@@ -1,5 +1,55 @@
 ## [Unreleased]
 
+### Security
+
+- **Cross-tenant elicitation/confirmation misroute (gateway mode).** The
+  "server reference" used by elicitation helpers (`src/utils/elicitation.ts`
+  — `elicitSelection` / `elicitText` / `elicitConfirmation`) was stored in a
+  module-level `let _server: Server | null` singleton in
+  `src/utils/server-ref.ts`, set synchronously per request via
+  `setServerRef(server)` (called from `createMcpServer()` in
+  `src/mcp-server.ts`) and read back later via `getServerRef()` — including
+  after `await` gaps inside async tool handlers (e.g. after awaiting a
+  Syncro API call, before sending an elicitation or confirmation prompt back
+  through "the" server).
+  - **Impact:** in gateway (multi-tenant HTTP) mode — `AUTH_MODE=gateway` —
+    a fresh `Server` instance is created per inbound request, so two
+    concurrent tenant requests could race through the shared global: tenant
+    A's request sets the ref and starts awaiting async work; before A
+    resumes, tenant B's request runs and overwrites the module-level ref
+    with B's server/transport; when A's awaited work resolves and it reads
+    the ref back to call `elicitInput`, it gets B's server — so A's
+    elicitation/confirmation prompt is sent down B's connection instead of
+    A's (or vice versa, depending on timing). Same shared-mutable-state
+    -across-await-gaps bug class as the credential-leak fixes in
+    liongard-mcp#58, ninjaone-mcp#71, and the identical server-ref fix in
+    halopsa-mcp#65, but in the server/transport routing subsystem for
+    elicitation, not credential/token caching.
+  - **Fix:** replaced the module-level singleton with an `AsyncLocalStorage<Server>`
+    context (`runWithServerRef` for per-request transports — Node HTTP,
+    Workers — and `bindServerRef` for the single-session stdio transport),
+    mirroring the existing per-request credential isolation pattern already
+    used for Syncro credentials (`credentialStore` in
+    `src/utils/credential-store.ts`). `getServerRef()` now reads from the
+    ALS context instead of a shared variable, so it is correctly scoped to
+    the request that created it and survives arbitrary `await` gaps without
+    observing a concurrent request's server. There is no module-level
+    mutable server/transport state left in `src/utils/server-ref.ts`. Call
+    sites updated: `src/mcp-server.ts` (`createMcpServer` no longer calls
+    `setServerRef`), `src/index.ts` (Node HTTP `handleMcp` wraps the
+    connect/handleRequest chain in `runWithServerRef`; stdio calls
+    `bindServerRef` once at startup), `src/worker.ts` (Cloudflare Workers
+    `handleMcp` wraps the connect/handleRequest chain in `runWithServerRef`).
+  - **Regression test:** `tests/utils/server-ref.test.ts` forces a
+    deterministic interleave (a manually-resolved "gate" promise, not a
+    timing stagger) where tenant A binds its server and suspends on an
+    await gap, tenant B's entire request runs to completion in the
+    meantime, and only then does tenant A resume and elicit. The test
+    asserts by value which tenant's mock `elicitInput` actually received
+    each message. Verified to fail with the exact predicted symptom
+    (`expected 'tenant-B' to be 'tenant-A'`) against a reinstated
+    module-singleton implementation, and to pass against the ALS-based fix.
+
 ### Added
 
 - **Interactive ticket card via MCP Apps (SEP-1865).** `syncro_tickets_get` results now render as an interactive card in MCP Apps hosts (Claude Desktop/web, and other hosts advertising the `io.modelcontextprotocol/ui` extension), instead of a wall of JSON. The card shows the ticket subject, status, problem type, resolved customer/contact names, key dates, and recent comments — and includes a working "Add comment" round-trip that calls `syncro_tickets_add_comment` with a safe internal-only (`hidden: true`) default resolved server-side. Non-App hosts are unaffected: the tool's JSON payload is unchanged apart from a new `_card` field.
