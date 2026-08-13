@@ -3,8 +3,33 @@
  *
  * This module provides lazy initialization of the Syncro client
  * to avoid loading the entire library upfront.
+ *
+ * CONSISTENCY (not a live vulnerability): this used to hold the cached
+ * client/credentials in module-level `let _client` / `let _credentials`
+ * singletons, with manual "did credentials change → invalidate → recreate"
+ * logic in `getClient()`. A prior security review traced that sequence
+ * end-to-end and confirmed it is NOT exploitable as coded — the
+ * validate/invalidate/recreate/return path runs synchronously with no
+ * `await` between checking credentials and using the resulting client, so
+ * there is no interleaving that hands one tenant another tenant's client.
+ *
+ * It was still structurally fragile: a future edit that introduced an
+ * `await` in the wrong spot could reintroduce that bug class, and it was
+ * the one piece of per-tenant state in this file still living in a shared
+ * mutable module variable instead of the AsyncLocalStorage-scoped pattern
+ * already used for credentials (`utils/credential-store.ts`) and the
+ * per-request server reference (`utils/server-ref.ts`, which fixed the
+ * literal same class of bug for a different piece of state — see that
+ * file's header for the concrete cross-tenant scenario it eliminates).
+ *
+ * This file now stores the cached client/credentials in an
+ * AsyncLocalStorage-scoped box instead, so there is no shared mutable
+ * module state left to reason about at all. Credential resolution, error
+ * handling, and the mismatch-detect-and-recreate behavior are unchanged —
+ * only where the mutable state lives has changed.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { SyncroClient } from "@wyre-technology/node-syncro";
 import { getRequestCredentials } from "./credential-store.js";
 import { cleanCredential } from "./clean-credential.js";
@@ -14,8 +39,66 @@ export interface SyncroCredentials {
   subdomain?: string;
 }
 
-let _client: SyncroClient | null = null;
-let _credentials: SyncroCredentials | null = null;
+/**
+ * Mutable client cache slot, scoped to a single AsyncLocalStorage context
+ * instead of the module. Each per-request scope (see `runWithClientScope`)
+ * gets its own independent box, so concurrent requests can never observe
+ * or invalidate each other's cached client.
+ */
+interface ClientScope {
+  client: SyncroClient | null;
+  credentials: SyncroCredentials | null;
+}
+
+function createScope(): ClientScope {
+  return { client: null, credentials: null };
+}
+
+const clientScopeStore = new AsyncLocalStorage<ClientScope>();
+
+/**
+ * Run a callback with a fresh client cache bound to the async context for
+ * the duration of that callback — including anything it `await`s or
+ * schedules. Use this for transports that handle one call per request
+ * (HTTP, Workers), so concurrent requests never share or invalidate each
+ * other's cached client.
+ */
+export function runWithClientScope<T>(fn: () => T): T {
+  return clientScopeStore.run(createScope(), fn);
+}
+
+/**
+ * Bind a fresh client cache for the remainder of the current synchronous
+ * execution and all following async work, without requiring a wrapping
+ * callback.
+ *
+ * Only safe for single-session transports (stdio) where exactly one caller
+ * exists for the whole process and there are no concurrent tenants to
+ * isolate from each other. Do NOT use this for per-request transports —
+ * use `runWithClientScope` there, since `enterWith` has no natural "scope
+ * end" and would leak across requests just like the old module-level
+ * singleton this replaces.
+ */
+export function bindClientScope(): void {
+  clientScopeStore.enterWith(createScope());
+}
+
+/**
+ * Get the client cache bound to the current async context, lazily binding
+ * a process-lifetime fallback scope if none has been established yet (e.g.
+ * direct calls from unit tests, or a stdio session that hasn't called
+ * `bindClientScope()`). Mirrors the previous module-level cache's behavior
+ * for every caller that never opted into per-request scoping.
+ */
+function getScope(): ClientScope {
+  const scope = clientScopeStore.getStore();
+  if (scope) {
+    return scope;
+  }
+  const fallback = createScope();
+  clientScopeStore.enterWith(fallback);
+  return fallback;
+}
 
 /**
  * Get credentials from the per-request store (gateway mode) or
@@ -69,33 +152,36 @@ export async function getClient(): Promise<SyncroClient> {
     );
   }
 
+  const scope = getScope();
+
   // If credentials changed, invalidate the cached client
   if (
-    _client &&
-    _credentials &&
-    (creds.apiKey !== _credentials.apiKey ||
-      creds.subdomain !== _credentials.subdomain)
+    scope.client &&
+    scope.credentials &&
+    (creds.apiKey !== scope.credentials.apiKey ||
+      creds.subdomain !== scope.credentials.subdomain)
   ) {
-    _client = null;
+    scope.client = null;
   }
 
-  if (!_client) {
+  if (!scope.client) {
     // Lazy import the library
     const { SyncroClient } = await import("@wyre-technology/node-syncro");
-    _client = new SyncroClient({
+    scope.client = new SyncroClient({
       apiKey: creds.apiKey,
       subdomain: creds.subdomain,
     });
-    _credentials = creds;
+    scope.credentials = creds;
   }
 
-  return _client;
+  return scope.client;
 }
 
 /**
  * Clear the cached client (useful for testing)
  */
 export function clearClient(): void {
-  _client = null;
-  _credentials = null;
+  const scope = getScope();
+  scope.client = null;
+  scope.credentials = null;
 }

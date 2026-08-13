@@ -3,7 +3,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getCredentials, getClient, clearClient } from "../../src/utils/client.js";
+import {
+  getCredentials,
+  getClient,
+  clearClient,
+  runWithClientScope,
+} from "../../src/utils/client.js";
+import { credentialStore } from "../../src/utils/credential-store.js";
 
 // Mock the Syncro client module
 vi.mock("@wyre-technology/node-syncro", () => ({
@@ -193,6 +199,77 @@ describe("client.ts", () => {
       await expect(getClient()).rejects.toThrow("SYNCRO_SUBDOMAIN is required");
       // The placeholder never reached the SDK constructor.
       expect(mockSyncroClient).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("runWithClientScope (tenant isolation)", () => {
+    // Regression for the AsyncLocalStorage refactor: prove that two
+    // concurrent "tenants" (distinct credential sets), each scoped via
+    // `runWithClientScope`, never observe or invalidate each other's cached
+    // client — even when an `await` gap separates validating credentials
+    // from using the resulting client, which is exactly the kind of edit
+    // a prior security review warned could reintroduce the old
+    // module-level-singleton bug class.
+    it("keeps each tenant's client isolated under concurrent, interleaved calls", async () => {
+      // Vitest's dynamic-import mock interception is not safe to race: two
+      // truly concurrent first-time `import()` calls for the same mocked
+      // specifier can non-deterministically resolve to the *real* package
+      // for one of them (a test-harness quirk, unrelated to the
+      // AsyncLocalStorage scoping under test here). So each tenant's own
+      // cold client creation happens sequentially — tenant B waits for
+      // tenant A's `getClient()` to resolve before making its own first
+      // call — via `gateA`. Everything after that first call (the await
+      // gap and the second `getClient()` re-use) still runs concurrently
+      // for both tenants, which is the property the prior security review
+      // scenario actually cared about: no interleaving between validating
+      // credentials and using the resulting client should let one tenant
+      // observe another's client.
+      let resolveGateA!: () => void;
+      const gateA = new Promise<void>((resolve) => {
+        resolveGateA = resolve;
+      });
+
+      async function runTenant(
+        apiKey: string,
+        subdomain: string,
+        waitFor?: Promise<void>
+      ) {
+        return credentialStore.run({ apiKey, subdomain }, () =>
+          runWithClientScope(async () => {
+            if (waitFor) {
+              await waitFor;
+            }
+            const client = await getClient();
+            resolveGateA();
+            // Simulate real work between validating credentials and the
+            // next use of the client, so the two tenants' async work
+            // interleaves on the event loop.
+            await new Promise((resolve) => setTimeout(resolve, Math.random() * 10));
+            const clientAgain = await getClient();
+            return { client, clientAgain };
+          })
+        );
+      }
+
+      const [tenantA, tenantB] = await Promise.all([
+        runTenant("tenant-a-key", "tenant-a"),
+        runTenant("tenant-b-key", "tenant-b", gateA),
+      ]);
+
+      // Each tenant's own two calls returned the same cached instance...
+      expect(tenantA.client).toBe(tenantA.clientAgain);
+      expect(tenantB.client).toBe(tenantB.clientAgain);
+      // ...but the two tenants never share a client instance...
+      expect(tenantA.client).not.toBe(tenantB.client);
+      // ...and each client was built with its own tenant's credentials.
+      expect((tenantA.client as unknown as { config: unknown }).config).toEqual({
+        apiKey: "tenant-a-key",
+        subdomain: "tenant-a",
+      });
+      expect((tenantB.client as unknown as { config: unknown }).config).toEqual({
+        apiKey: "tenant-b-key",
+        subdomain: "tenant-b",
+      });
     });
   });
 

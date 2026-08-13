@@ -25,6 +25,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { createMcpServer } from "./mcp-server.js";
 import { credentialStore } from "./utils/credential-store.js";
 import { runWithServerRef, bindServerRef } from "./utils/server-ref.js";
+import { runWithClientScope, bindClientScope } from "./utils/client.js";
 import { verifyS2sHeader, S2S_HEADER } from "./s2s-verify.js";
 
 const S2S_SECRET = process.env.CONDUIT_S2S_SECRET || "";
@@ -125,10 +126,14 @@ async function startHttpTransport(): Promise<void> {
         // Bind this request's server into the per-request async context
         // (not a module-level global) so elicitation helpers resolve
         // *this* server/transport even after await gaps, and never a
-        // concurrent request's — see utils/server-ref.ts.
+        // concurrent request's — see utils/server-ref.ts. The client cache
+        // is scoped the same way (see utils/client.ts) so concurrent
+        // requests never share or invalidate each other's Syncro client.
         runWithServerRef(server, () => {
-          server.connect(transport).then(() => {
-            transport.handleRequest(req, res);
+          runWithClientScope(() => {
+            server.connect(transport).then(() => {
+              transport.handleRequest(req, res);
+            });
           });
         });
       };
@@ -184,8 +189,10 @@ async function main() {
     const server = createMcpServer();
     // stdio is single-session (one process = one caller), so there is no
     // concurrent tenant to isolate from — bind once for the process
-    // lifetime rather than per-request. See utils/server-ref.ts.
+    // lifetime rather than per-request. See utils/server-ref.ts and
+    // utils/client.ts.
     bindServerRef(server);
+    bindClientScope();
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("Syncro MCP server running on stdio");
