@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.wyre-technology/syncro-mcp",
+  "name": "io.github.WYRE-AI/syncro-mcp",
   "title": "Syncro",
   "description": "MCP server for Syncro MSP — customers, tickets, assets, invoices, and more.",
   "repository": {
-    "url": "https://github.com/wyre-technology/syncro-mcp",
+    "url": "https://github.com/WYRE-AI/syncro-mcp",
     "source": "github"
   },
   "version": "0.0.0",
-  "websiteUrl": "https://github.com/wyre-technology/syncro-mcp",
+  "websiteUrl": "https://github.com/WYRE-AI/syncro-mcp",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/wyre-technology/syncro-mcp:0.0.0",
+      "identifier": "ghcr.io/wyre-ai/syncro-mcp:0.0.0",
       "transport": {
         "type": "stdio"
       },

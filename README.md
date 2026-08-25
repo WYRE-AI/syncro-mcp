@@ -5,9 +5,9 @@ A Model Context Protocol (MCP) server for Syncro MSP, implementing a decision tr
 
 ## One-Click Deployment
 
-[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/wyre-technology/syncro-mcp/tree/main)
+[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/WYRE-AI/syncro-mcp/tree/main)
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wyre-technology/syncro-mcp)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/WYRE-AI/syncro-mcp)
 
 > **Operator note — GitHub Packages authentication (required for one-click deploys).**
 > This server depends on the private `@wyre-technology/node-syncro` SDK, which is
@@ -32,7 +32,7 @@ A Model Context Protocol (MCP) server for Syncro MSP, implementing a decision tr
 
 ## Installation
 
-> WYRE MCP servers are distributed via OCI/GHCR images and (where available) MCPB bundles. The npm package `@wyre-technology/syncro-mcp` is also published to **GitHub Packages** (`npm.pkg.github.com`); installing it requires an authenticated `.npmrc` with `read:packages` scope (run `export NODE_AUTH_TOKEN=$(gh auth token)` locally).
+> WYRE MCP servers are distributed via OCI/GHCR images and (where available) MCPB bundles. The npm package `@wyre-ai/syncro-mcp` is also published to **GitHub Packages** (`npm.pkg.github.com`); installing it requires an authenticated `.npmrc` with `read:packages` scope (run `export NODE_AUTH_TOKEN=$(gh auth token)` locally).
 
 ### Option 1: WYRE MCP Gateway (Recommended)
 
@@ -58,7 +58,7 @@ Use the hosted gateway at [mcp.wyre.ai](https://mcp.wyre.ai) — paste your Sync
 claude mcp add syncro \
   -e SYNCRO_API_KEY=your-api-key \
   -e SYNCRO_SUBDOMAIN=your-subdomain \
-  -- npx -y github:wyre-technology/syncro-mcp
+  -- npx -y github:WYRE-AI/syncro-mcp
 ```
 
 ### Option 3: Docker (GHCR)
@@ -67,13 +67,13 @@ claude mcp add syncro \
 docker run --rm \
   -e SYNCRO_API_KEY=your-api-key \
   -e SYNCRO_SUBDOMAIN=your-subdomain \
-  ghcr.io/wyre-technology/syncro-mcp:latest
+  ghcr.io/wyre-ai/syncro-mcp:latest
 ```
 
 ### Option 4: From Source
 
 ```bash
-git clone https://github.com/wyre-technology/syncro-mcp.git
+git clone https://github.com/WYRE-AI/syncro-mcp.git
 cd syncro-mcp
 npm ci
 npm run build
