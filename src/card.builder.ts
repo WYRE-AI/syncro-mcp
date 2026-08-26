@@ -8,7 +8,7 @@
  * unchanged.
  */
 
-import type { SyncroClient } from "@wyre-technology/node-syncro";
+import type { SyncroClient } from "@wyre-ai/node-syncro";
 
 export const TICKET_CARD_RESOURCE_URI = "ui://syncro/ticket-card.html";
 

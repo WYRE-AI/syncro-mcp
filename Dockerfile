@@ -5,7 +5,7 @@ FROM node:26-alpine AS builder
 ARG VERSION="unknown"
 ARG COMMIT_SHA="unknown"
 ARG BUILD_DATE="unknown"
-# GitHub PAT with read:packages, used only to install @wyre-technology/* from
+# GitHub PAT with read:packages, used only to install @wyre-ai/* from
 # GitHub Packages. Build-time only; never baked into the final image.
 # DigitalOcean App Platform supplies this as a build-time env var (it does not
 # support BuildKit secret mounts), so we accept it both as a build ARG and via
