@@ -5,9 +5,9 @@
   "version": "0.0.0",
   "description": "MCP server for Syncro MSP - access tickets, customers, assets, and invoices through AI assistants",
   "long_description": "Provides AI assistants with structured access to your Syncro MSP data. Manage tickets, customers, assets, invoices, and more through the Model Context Protocol.",
-  "author": { "name": "Wyre Technology", "url": "https://github.com/wyre-technology" },
-  "repository": { "type": "git", "url": "https://github.com/wyre-technology/syncro-mcp" },
-  "homepage": "https://github.com/wyre-technology/syncro-mcp",
+  "author": { "name": "Wyre Technology", "url": "https://github.com/WYRE-AI" },
+  "repository": { "type": "git", "url": "https://github.com/WYRE-AI/syncro-mcp" },
+  "homepage": "https://github.com/WYRE-AI/syncro-mcp",
   "license": "Apache-2.0",
   "keywords": ["syncro", "msp", "rmm", "psa", "tickets", "it-management"],
   "server": {

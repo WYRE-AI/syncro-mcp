@@ -30,7 +30,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { SyncroClient } from "@wyre-technology/node-syncro";
+import type { SyncroClient } from "@wyre-ai/node-syncro";
 import { getRequestCredentials } from "./credential-store.js";
 import { cleanCredential } from "./clean-credential.js";
 
@@ -166,7 +166,7 @@ export async function getClient(): Promise<SyncroClient> {
 
   if (!scope.client) {
     // Lazy import the library
-    const { SyncroClient } = await import("@wyre-technology/node-syncro");
+    const { SyncroClient } = await import("@wyre-ai/node-syncro");
     scope.client = new SyncroClient({
       apiKey: creds.apiKey,
       subdomain: creds.subdomain,

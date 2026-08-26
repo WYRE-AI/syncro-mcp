@@ -12,7 +12,7 @@ import {
 import { credentialStore } from "../../src/utils/credential-store.js";
 
 // Mock the Syncro client module
-vi.mock("@wyre-technology/node-syncro", () => ({
+vi.mock("@wyre-ai/node-syncro", () => ({
   SyncroClient: vi.fn().mockImplementation(function (config) { return ({
     config,
     customers: { list: vi.fn(), get: vi.fn(), create: vi.fn() },
@@ -123,7 +123,7 @@ describe("client.ts", () => {
     });
 
     it("should create new client when credentials change", async () => {
-      const { SyncroClient } = await import("@wyre-technology/node-syncro");
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
       const mockSyncroClient = vi.mocked(SyncroClient);
 
       process.env.SYNCRO_API_KEY = "first-api-key";
@@ -151,7 +151,7 @@ describe("client.ts", () => {
     });
 
     it("should create new client when subdomain changes", async () => {
-      const { SyncroClient } = await import("@wyre-technology/node-syncro");
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
       const mockSyncroClient = vi.mocked(SyncroClient);
 
       process.env.SYNCRO_API_KEY = "test-api-key";
@@ -190,7 +190,7 @@ describe("client.ts", () => {
     // .syncromsp.com" and DNS-fail on every request). Instead we fail fast with
     // a clear "required" error and never construct the client.
     it("should reject an unresolved subdomain placeholder instead of building a bogus host", async () => {
-      const { SyncroClient } = await import("@wyre-technology/node-syncro");
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
       const mockSyncroClient = vi.mocked(SyncroClient);
 
       process.env.SYNCRO_API_KEY = "test-api-key";

@@ -5,7 +5,7 @@ FROM node:26-alpine AS builder
 ARG VERSION="unknown"
 ARG COMMIT_SHA="unknown"
 ARG BUILD_DATE="unknown"
-# GitHub PAT with read:packages, used only to install @wyre-technology/* from
+# GitHub PAT with read:packages, used only to install @wyre-ai/* from
 # GitHub Packages. Build-time only; never baked into the final image.
 # DigitalOcean App Platform supplies this as a build-time env var (it does not
 # support BuildKit secret mounts), so we accept it both as a build ARG and via
@@ -100,9 +100,9 @@ LABEL org.opencontainers.image.description="Model Context Protocol server for Sy
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${COMMIT_SHA}"
-LABEL org.opencontainers.image.source="https://github.com/wyre-technology/syncro-mcp"
-LABEL org.opencontainers.image.documentation="https://github.com/wyre-technology/syncro-mcp/blob/main/README.md"
-LABEL org.opencontainers.image.url="https://github.com/wyre-technology/syncro-mcp/pkgs/container/syncro-mcp"
+LABEL org.opencontainers.image.source="https://github.com/WYRE-AI/syncro-mcp"
+LABEL org.opencontainers.image.documentation="https://github.com/WYRE-AI/syncro-mcp/blob/main/README.md"
+LABEL org.opencontainers.image.url="https://github.com/WYRE-AI/syncro-mcp/pkgs/container/syncro-mcp"
 LABEL org.opencontainers.image.vendor="Wyre Technology"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL io.modelcontextprotocol.server.name="io.github.wyre-technology/syncro-mcp"
+LABEL io.modelcontextprotocol.server.name="io.github.WYRE-AI/syncro-mcp"
