@@ -66,6 +66,15 @@
 
 ### Fixed
 
+- **`syncro_status` and the unknown-tool error advised calling
+  `syncro_navigate` to discover tools without qualification.** Conduit
+  suppresses `*_navigate` / `*_back` at the gateway (tier filtering lives in
+  the grant resolver, which the container cannot see) and replaces them with
+  `conduit__my_access`, so that advice pointed callers behind the gateway at
+  a tool that returns method-not-found. Both strings now point to
+  `conduit__my_access` for gateway callers and keep `syncro_navigate` as the
+  standalone-mode discovery path. The tool itself is unchanged.
+  (WYRE-AI/conduit#1236)
 - **deps:** bump `@wyre-technology/node-syncro` to
   [v1.0.5](https://github.com/wyre-technology/node-syncro/releases/tag/v1.0.5),
   which reads each HTTP response body exactly once. Previously the SDK's error

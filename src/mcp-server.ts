@@ -241,7 +241,7 @@ export function createMcpServer(): Server {
           content: [
             {
               type: "text",
-              text: `Syncro MCP Server Status\n\nCredentials: ${credStatus}\nAvailable domains: ${getAvailableDomains().join(", ")}\nRate limit: 180 requests/minute\n\nAll tools are available at all times. Use syncro_navigate to discover tools by domain.`,
+              text: `Syncro MCP Server Status\n\nCredentials: ${credStatus}\nAvailable domains: ${getAvailableDomains().join(", ")}\nRate limit: 180 requests/minute\n\nCall conduit__my_access to see which tools you can use under the gateway, or syncro_navigate to browse all tools by domain when running standalone.`,
             },
           ],
         };
@@ -276,7 +276,7 @@ export function createMcpServer(): Server {
         content: [
           {
             type: "text",
-            text: `Unknown tool: ${name}. Use syncro_navigate to discover available tools by domain.`,
+            text: `Unknown tool: ${name}. Call conduit__my_access to see which tools you can use under the gateway, or syncro_navigate to browse available tools by domain when running standalone.`,
           },
         ],
         isError: true,
