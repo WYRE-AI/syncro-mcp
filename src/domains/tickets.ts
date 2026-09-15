@@ -286,8 +286,13 @@ async function handleCall(
         /* card is progressive enhancement — serve the plain JSON */
       }
 
+      const summary = `Ticket #${ticket.number ?? ticket.id} (${
+        ticket.status ?? "unknown status"
+      }): ${ticket.subject ?? "no subject"}`;
+
       return {
-        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        content: [{ type: "text", text: summary }],
+        structuredContent: payload,
       };
     }
 
