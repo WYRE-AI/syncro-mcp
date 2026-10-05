@@ -246,4 +246,56 @@ describe("MCP Apps ticket card", () => {
       expect(card?.status).toBeUndefined();
     });
   });
+
+  describe("content/structuredContent split (SEP-1865)", () => {
+    it("syncro_tickets_get returns a plain-text summary in content and the JSON payload in structuredContent", async () => {
+      const { ticketsHandler } = await import("../src/domains/tickets.js");
+      const clientModule = await import("../src/utils/client.js");
+      vi.spyOn(clientModule, "getClient").mockResolvedValue({
+        tickets: {
+          get: vi.fn(async () => ({
+            id: 456,
+            number: "789",
+            subject: "Help needed",
+            status: "New",
+          })),
+        },
+      } as never);
+
+      const result = await ticketsHandler.handleCall("syncro_tickets_get", {
+        ticket_id: 456,
+      });
+
+      const text = (result.content[0] as { text: string }).text;
+      // content is a human-readable summary, not a JSON dump.
+      expect(() => JSON.parse(text)).toThrow();
+      expect(text).toContain("789");
+      expect(text).toContain("Help needed");
+
+      const structured = result.structuredContent as {
+        id: number;
+        subject: string;
+      };
+      expect(structured.id).toBe(456);
+      expect(structured.subject).toBe("Help needed");
+    });
+  });
+
+  describe("server capability declaration (SEP-1865)", () => {
+    it("declares io.modelcontextprotocol/ui in the server capabilities", async () => {
+      const { createMcpServer } = await import("../src/mcp-server.js");
+      const server = createMcpServer();
+      const caps = (
+        server as unknown as {
+          _capabilities: {
+            extensions?: Record<string, { mimeTypes?: string[] }>;
+          };
+        }
+      )._capabilities;
+      expect(caps.extensions?.["io.modelcontextprotocol/ui"]).toBeDefined();
+      expect(
+        caps.extensions?.["io.modelcontextprotocol/ui"]?.mimeTypes
+      ).toContain(MCP_APP_RESOURCE_MIME);
+    });
+  });
 });

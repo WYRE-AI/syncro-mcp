@@ -128,9 +128,15 @@ describe("domains/tickets.ts", () => {
 
         expect(mockClient.tickets.get).toHaveBeenCalledWith(456);
 
-        const parsed = JSON.parse((result.content[0] as { text: string }).text);
-        expect(parsed.id).toBe(456);
-        expect(parsed.subject).toBe("Help needed");
+        expect((result.content[0] as { text: string }).text).toContain(
+          "Help needed"
+        );
+        const structured = result.structuredContent as {
+          id: number;
+          subject: string;
+        };
+        expect(structured.id).toBe(456);
+        expect(structured.subject).toBe("Help needed");
       });
     });
 
