@@ -63,10 +63,30 @@ claude mcp add syncro \
 
 ### Option 3: Docker (GHCR)
 
+The image listens on `0.0.0.0` inside the container and defaults to `AUTH_MODE=gateway`. Publish the port on loopback and pass the service-to-service secret. In gateway mode, Syncro credentials arrive on each request as headers; they are not read from the environment.
+
 ```bash
 docker run --rm \
+  -e CONDUIT_S2S_SECRET=your-s2s-secret \
+  -p 127.0.0.1:8080:8080 \
+  ghcr.io/wyre-ai/syncro-mcp:latest
+```
+
+Compose refuses to start when `CONDUIT_S2S_SECRET` is unset, runs `AUTH_MODE=gateway` with no static `SYNCRO_*` credentials, and publishes `127.0.0.1:8080:8080`:
+
+```bash
+CONDUIT_S2S_SECRET=your-s2s-secret docker compose up
+```
+
+Single-tenant HTTP (`AUTH_MODE=env`) still requires the S2S secret, then uses `SYNCRO_API_KEY`:
+
+```bash
+docker run --rm \
+  -e CONDUIT_S2S_SECRET=your-s2s-secret \
+  -e AUTH_MODE=env \
   -e SYNCRO_API_KEY=your-api-key \
   -e SYNCRO_SUBDOMAIN=your-subdomain \
+  -p 127.0.0.1:8080:8080 \
   ghcr.io/wyre-ai/syncro-mcp:latest
 ```
 
@@ -82,12 +102,46 @@ node dist/index.js
 
 ## Configuration
 
-Set the following environment variables:
+Copy [`.env.example`](.env.example) and set the variables below.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `SYNCRO_API_KEY` | Yes | Your Syncro API key |
+| `SYNCRO_API_KEY` | For stdio and `AUTH_MODE=env` | Your Syncro API key |
 | `SYNCRO_SUBDOMAIN` | No | Your Syncro subdomain (if applicable) |
+| `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
+| `AUTH_MODE` | No | `gateway` (Docker image and Compose default) or `env`. Gateway mode requires `X-Syncro-API-Key` on each `/mcp` request and never falls back to `SYNCRO_*`. `env` uses those variables only after S2S auth succeeds. |
+| `CONDUIT_S2S_SECRET` | Yes for HTTP | Service-to-service secret. The HTTP server logs an error and exits non-zero when this is empty or a known placeholder (`changeme`, `your-s2s-secret`, `replace-with-a-real-secret`, `secret`, an unresolved `${...}` value, and the other example strings). Compose will not start without it. Never commit a real value. Generate one with `openssl rand -hex 32`. |
+| `MCP_ALLOW_INSECURE_DEV` | No | Set to exactly `1` only for local development to start HTTP without `CONDUIT_S2S_SECRET`. The process logs a warning, does not enforce `X-Gateway-S2S`, and binds `127.0.0.1` only. A wider `MCP_HTTP_HOST` (including `0.0.0.0`) is ignored and the override is logged. A known placeholder secret still refuses to start. |
+| `MCP_HTTP_HOST` | No | Bind address when `MCP_TRANSPORT=http` and `CONDUIT_S2S_SECRET` is set. Defaults to `127.0.0.1` when unset. The container image sets `0.0.0.0`. |
+| `MCP_HTTP_PORT` | No | HTTP port. Defaults to `8080`. |
+
+`/health` stays unauthenticated and does not read credentials. The stdio transport does not use `CONDUIT_S2S_SECRET`.
+
+### HTTP authentication
+
+With `MCP_TRANSPORT=http` and `CONDUIT_S2S_SECRET` set, every `/mcp` request must include `X-Gateway-S2S`. The value is `t=<unix seconds>,v1=<hex>`, where the hex is HMAC-SHA256 of the literal string `t=<unix seconds>` keyed with `CONDUIT_S2S_SECRET` (64 lowercase hex characters). The timestamp must be within 300 seconds of the server clock. A missing or invalid header returns 401 before vendor credentials are read. The secret is never logged.
+
+```bash
+TS=$(date +%s)
+SIG=$(printf 't=%s' "$TS" | openssl dgst -sha256 -hmac "$CONDUIT_S2S_SECRET" -hex | awk '{print $NF}')
+curl -sS http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "X-Gateway-S2S: t=${TS},v1=${SIG}" \
+  -H "X-Syncro-API-Key: $SYNCRO_API_KEY" \
+  -H "X-Syncro-Subdomain: $SYNCRO_SUBDOMAIN" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+In `AUTH_MODE=gateway`, `/mcp` also requires `X-Syncro-API-Key` (`X-Syncro-Subdomain` is optional). Those headers are the only credential source for that request. A request missing the API key returns 401 and does not fall back to `SYNCRO_API_KEY` in the process environment.
+
+In `AUTH_MODE=env`, `/mcp` still requires a valid `X-Gateway-S2S` header. Vendor credentials come from `SYNCRO_API_KEY` and `SYNCRO_SUBDOMAIN` when the request does not carry `X-Syncro-API-Key`.
+
+Local HTTP without a secret is development-only. It binds `127.0.0.1` and logs a warning:
+
+```bash
+MCP_TRANSPORT=http MCP_ALLOW_INSECURE_DEV=1 npm start
+```
 
 ### Getting Your API Key
 
@@ -360,8 +414,14 @@ npm install
 # Build
 npm run build
 
-# Run in development
+# Run in development (stdio)
 npm run dev
+
+# HTTP refuses to start until CONDUIT_S2S_SECRET is a real secret
+CONDUIT_S2S_SECRET="$CONDUIT_S2S_SECRET" MCP_TRANSPORT=http npm start
+
+# Local HTTP only, without a service-to-service secret (always binds 127.0.0.1)
+MCP_ALLOW_INSECURE_DEV=1 MCP_TRANSPORT=http npm start
 
 # Type check
 npm run typecheck
