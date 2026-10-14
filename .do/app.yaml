@@ -15,6 +15,9 @@ services:
         value: http
       - key: AUTH_MODE
         value: env
+      - key: CONDUIT_S2S_SECRET
+        scope: RUN_TIME
+        type: SECRET
       - key: SYNCRO_API_KEY
         scope: RUN_TIME
         type: SECRET
