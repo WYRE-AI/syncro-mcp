@@ -7,6 +7,11 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import {
+  ADDITIVE_WRITE,
+  DESTRUCTIVE,
+  READ_ONLY,
+} from "../utils/annotations.js";
 
 /**
  * Get invoice domain tools
@@ -17,6 +22,7 @@ function getTools(): Tool[] {
       name: "syncro_invoices_list",
       description:
         "List invoices in Syncro. Can filter by customer, status, or date range.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -52,6 +58,7 @@ function getTools(): Tool[] {
       name: "syncro_invoices_get",
       description:
         "Get details for a specific invoice by its ID, including line items",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -66,6 +73,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_invoices_create",
       description: "Create a new invoice in Syncro",
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -91,7 +99,9 @@ function getTools(): Tool[] {
     },
     {
       name: "syncro_invoices_email",
-      description: "Email an invoice to the customer",
+      description:
+        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. Confirm with the user before invoking.",
+      annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
         properties: {

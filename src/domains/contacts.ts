@@ -7,6 +7,10 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import {
+  ADDITIVE_WRITE,
+  READ_ONLY,
+} from "../utils/annotations.js";
 
 /**
  * Get contact domain tools
@@ -17,6 +21,7 @@ function getTools(): Tool[] {
       name: "syncro_contacts_list",
       description:
         "List contacts in Syncro. Can filter by customer ID or search query.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -42,6 +47,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_contacts_get",
       description: "Get details for a specific contact by their ID",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -56,6 +62,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_contacts_create",
       description: "Create a new contact in Syncro",
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {

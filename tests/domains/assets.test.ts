@@ -5,12 +5,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { assetsHandler } from "../../src/domains/assets.js";
 import * as clientModule from "../../src/utils/client.js";
+import * as restModule from "../../src/utils/rest.js";
+import * as guardModule from "../../src/utils/write-guard.js";
 
 // Mock the client module
 vi.mock("../../src/utils/client.js", () => ({
   getClient: vi.fn(),
   getCredentials: vi.fn(),
   clearClient: vi.fn(),
+}));
+
+vi.mock("../../src/utils/rest.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/utils/rest.js")>()),
+  syncroRest: vi.fn(),
+}));
+
+vi.mock("../../src/utils/write-guard.js", () => ({
+  guardWrite: vi.fn(),
 }));
 
 describe("domains/assets.ts", () => {
@@ -24,17 +35,25 @@ describe("domains/assets.ts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+    vi.mocked(restModule.syncroRest).mockReset();
+    vi.mocked(guardModule.guardWrite).mockReset();
+    vi.mocked(guardModule.guardWrite).mockResolvedValue(null);
   });
 
   describe("getTools", () => {
     it("should return all asset tools", () => {
       const tools = assetsHandler.getTools();
 
-      expect(tools).toHaveLength(3);
+      expect(tools).toHaveLength(8);
       expect(tools.map((t) => t.name)).toEqual([
         "syncro_assets_list",
         "syncro_assets_get",
         "syncro_assets_search",
+        "syncro_assets_get_patches",
+        "syncro_assets_list_installed_applications",
+        "syncro_assets_list_policy_folders",
+        "syncro_assets_set_policy_folder",
+        "syncro_assets_run_script",
       ]);
     });
 
@@ -256,6 +275,178 @@ describe("domains/assets.ts", () => {
             perPage: 25,
           })
         );
+      });
+    });
+
+    describe("syncro_assets_get_patches", () => {
+      it("reads the asset's patch status", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({
+          installed_patches: [],
+          available_patches: [{ kb: "KB5027215", status: "Failed Patches" }],
+        });
+
+        const result = await assetsHandler.handleCall("syncro_assets_get_patches", {
+          asset_id: 42,
+        });
+
+        expect(restModule.syncroRest).toHaveBeenCalledWith(
+          "/customer_assets/42/patches"
+        );
+        const parsed = JSON.parse((result.content[0] as { text: string }).text);
+        expect(parsed.available_patches[0].kb).toBe("KB5027215");
+      });
+    });
+
+    describe("syncro_assets_list_installed_applications", () => {
+      it("lists installed applications with pagination", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({
+          installed_applications: [{ name: "Syncro Backup" }],
+          meta: { page: 1 },
+        });
+
+        await assetsHandler.handleCall("syncro_assets_list_installed_applications", {
+          asset_id: 42,
+          page: 2,
+        });
+
+        expect(restModule.syncroRest).toHaveBeenCalledWith(
+          "/customer_assets/42/installed_applications",
+          { params: { page: 2, per_page: undefined } }
+        );
+      });
+
+      it("returns an explicit error when nothing is installed", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({
+          installed_applications: [],
+        });
+
+        const result = await assetsHandler.handleCall(
+          "syncro_assets_list_installed_applications",
+          { asset_id: 42 }
+        );
+        expect(result.isError).toBe(true);
+      });
+    });
+
+    describe("syncro_assets_list_policy_folders", () => {
+      it("lists a customer's policy folders", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({
+          policy_folders: [{ id: 2, name: "Workstations" }],
+        });
+
+        await assetsHandler.handleCall("syncro_assets_list_policy_folders", {
+          customer_id: 9,
+        });
+
+        expect(restModule.syncroRest).toHaveBeenCalledWith("/policy_folders", {
+          params: { customer_id: 9, page: undefined, per_page: undefined },
+        });
+      });
+    });
+
+    describe("syncro_assets_set_policy_folder", () => {
+      it("sends only policy_folder_id after confirmation", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({
+          asset: { id: 42, policy_folder_id: 2 },
+        });
+
+        const result = await assetsHandler.handleCall(
+          "syncro_assets_set_policy_folder",
+          { asset_id: 42, policy_folder_id: 2 }
+        );
+
+        expect(guardModule.guardWrite).toHaveBeenCalledOnce();
+        expect(restModule.syncroRest).toHaveBeenCalledWith("/customer_assets/42", {
+          method: "PUT",
+          body: { policy_folder_id: 2 },
+        });
+        const parsed = JSON.parse((result.content[0] as { text: string }).text);
+        expect(parsed.policy_folder_id).toBe(2);
+      });
+
+      it("does not call Syncro when the user declines", async () => {
+        vi.mocked(guardModule.guardWrite).mockResolvedValue({
+          content: [{ type: "text", text: "Cancelled" }],
+        });
+
+        await assetsHandler.handleCall("syncro_assets_set_policy_folder", {
+          asset_id: 42,
+          policy_folder_id: 2,
+        });
+
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("syncro_assets_run_script", () => {
+      it("runs a script now as a destructive, confirmed action", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({
+          message: "Ok, script scheduled.",
+        });
+        const args = { asset_id: 42, script_id: 7, confirm: true };
+
+        await assetsHandler.handleCall("syncro_assets_run_script", args);
+
+        expect(guardModule.guardWrite).toHaveBeenCalledWith(
+          expect.stringContaining("Run Syncro script 7 on asset 42 now?"),
+          { destructive: true, args }
+        );
+        expect(restModule.syncroRest).toHaveBeenCalledWith(
+          "/rmm/public_scripts/42/schedule",
+          {
+            method: "POST",
+            body: {
+              script_id: 7,
+              run_type: "now",
+              next_time: undefined,
+              freq: "once",
+            },
+          }
+        );
+      });
+
+      it("schedules a one-off later run with options", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+        await assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          run_at: "2026-11-07T02:00:00Z",
+          run_as: "system",
+          variables: { reboot: "false" },
+        });
+
+        expect(restModule.syncroRest).toHaveBeenCalledWith(
+          "/rmm/public_scripts/42/schedule",
+          {
+            method: "POST",
+            body: {
+              script_id: 7,
+              run_type: "later",
+              next_time: "2026-11-07T02:00:00Z",
+              freq: "once",
+              script_options: {
+                run_as: "system",
+                runtime_variables: { reboot: "false" },
+              },
+            },
+          }
+        );
+      });
+
+      it("does not run when the guard blocks it", async () => {
+        vi.mocked(guardModule.guardWrite).mockResolvedValue({
+          content: [{ type: "text", text: "Confirmation required" }],
+          isError: true,
+        });
+
+        const result = await assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+        });
+
+        expect(result.isError).toBe(true);
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
       });
     });
 

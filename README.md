@@ -166,10 +166,13 @@ This reduces cognitive load and improves LLM tool selection accuracy.
 | Domain | Description | Tools |
 |--------|-------------|-------|
 | `customers` | Manage customer accounts | list, get, create, search |
-| `tickets` | Manage support tickets | list, get, create, update, add_comment |
-| `assets` | Manage configuration items | list, get, search |
+| `tickets` | Manage support tickets | list, get, create, update, add_comment, add_line_item |
+| `assets` | Manage assets and RMM actions | list, get, search, get_patches, list_installed_applications, list_policy_folders, set_policy_folder, run_script |
 | `contacts` | Manage customer contacts | list, get, create |
 | `invoices` | View and manage billing | list, get, create, email |
+| `time` | Ticket time entries | list_entries, log_entry, set_billable |
+
+Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) that classify it as read, write, or destructive. Write tools added for the MSP job set (time, ticket line items, policy folders, scripts) ask for confirmation through MCP elicitation; a declined prompt cancels the call. `syncro_assets_run_script` is destructive: when the client cannot show a prompt it also requires `confirm: true`. See [`docs/WYREAI-464-capability-diff.md`](docs/WYREAI-464-capability-diff.md) for how this server and the official Syncro MCP split coverage.
 
 ## Tools Reference
 
@@ -180,7 +183,7 @@ Navigate to a domain to access its tools.
 
 ```json
 {
-  "domain": "customers" | "tickets" | "assets" | "contacts" | "invoices"
+  "domain": "customers" | "tickets" | "assets" | "contacts" | "invoices" | "time"
 }
 ```
 
@@ -294,6 +297,19 @@ Add a comment to a ticket.
 }
 ```
 
+#### syncro_tickets_add_line_item
+Add a billable line item to a ticket (write, asks for confirmation).
+
+```json
+{
+  "ticket_id": 789,
+  "name": "Onsite labor",
+  "description": "1h onsite",
+  "quantity": 1,
+  "price_retail": 150
+}
+```
+
 ### Assets Domain
 
 #### syncro_assets_list
@@ -322,6 +338,55 @@ Search assets by query or serial number.
 {
   "query": "workstation",
   "asset_serial": "SN12345"
+}
+```
+
+#### syncro_assets_get_patches
+Windows patch status for an RMM-managed asset (installed, missing, failed, rejected).
+
+```json
+{
+  "asset_id": 456
+}
+```
+
+#### syncro_assets_list_installed_applications
+Software installed on an RMM-managed asset, e.g. to confirm a backup agent is present.
+
+```json
+{
+  "asset_id": 456
+}
+```
+
+#### syncro_assets_list_policy_folders
+A customer's RMM policy folders.
+
+```json
+{
+  "customer_id": 123
+}
+```
+
+#### syncro_assets_set_policy_folder
+Move an asset into a policy folder, which changes its RMM and patch policy (write, asks for confirmation).
+
+```json
+{
+  "asset_id": 456,
+  "policy_folder_id": 2
+}
+```
+
+#### syncro_assets_run_script
+Run an existing Syncro RMM script once on an asset, now or at `run_at` (destructive, asks for confirmation).
+
+```json
+{
+  "asset_id": 456,
+  "script_id": 77,
+  "run_at": "2026-11-07T02:00:00Z",
+  "confirm": true
 }
 ```
 
@@ -396,6 +461,42 @@ Email an invoice to the customer.
 {
   "invoice_id": 456,
   "subject": "Your Invoice"
+}
+```
+
+### Time Domain
+
+#### syncro_time_list_entries
+List ticket time entries. `billing_status: "unbilled"` finds billable work not yet charged.
+
+```json
+{
+  "customer_id": 123,
+  "billing_status": "unbilled",
+  "created_after": "2026-10-01"
+}
+```
+
+#### syncro_time_log_entry
+Log completed time on a ticket with a billable flag (write, asks for confirmation).
+
+```json
+{
+  "ticket_id": 789,
+  "start_at": "2026-11-05T14:00:00Z",
+  "duration_minutes": 30,
+  "billable": true,
+  "notes": "Reset MFA"
+}
+```
+
+#### syncro_time_set_billable
+Mark an existing time entry billable or non-billable (write, asks for confirmation).
+
+```json
+{
+  "timer_id": 11,
+  "billable": false
 }
 ```
 

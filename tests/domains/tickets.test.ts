@@ -5,12 +5,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ticketsHandler } from "../../src/domains/tickets.js";
 import * as clientModule from "../../src/utils/client.js";
+import * as restModule from "../../src/utils/rest.js";
+import * as guardModule from "../../src/utils/write-guard.js";
 
 // Mock the client module
 vi.mock("../../src/utils/client.js", () => ({
   getClient: vi.fn(),
   getCredentials: vi.fn(),
   clearClient: vi.fn(),
+}));
+
+vi.mock("../../src/utils/rest.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/utils/rest.js")>()),
+  syncroRest: vi.fn(),
+}));
+
+vi.mock("../../src/utils/write-guard.js", () => ({
+  guardWrite: vi.fn(),
 }));
 
 describe("domains/tickets.ts", () => {
@@ -27,19 +38,23 @@ describe("domains/tickets.ts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+    vi.mocked(restModule.syncroRest).mockReset();
+    vi.mocked(guardModule.guardWrite).mockReset();
+    vi.mocked(guardModule.guardWrite).mockResolvedValue(null);
   });
 
   describe("getTools", () => {
     it("should return all ticket tools", () => {
       const tools = ticketsHandler.getTools();
 
-      expect(tools).toHaveLength(5);
+      expect(tools).toHaveLength(6);
       expect(tools.map((t) => t.name)).toEqual([
         "syncro_tickets_list",
         "syncro_tickets_get",
         "syncro_tickets_create",
         "syncro_tickets_update",
         "syncro_tickets_add_comment",
+        "syncro_tickets_add_line_item",
       ]);
     });
 
@@ -257,6 +272,61 @@ describe("domains/tickets.ts", () => {
           hidden: true,
           do_not_email: true,
         });
+      });
+    });
+
+    describe("syncro_tickets_add_line_item", () => {
+      it("adds a confirmed line item with quantity defaulting to 1", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({
+          id: 1,
+          ticket_id: 17,
+          name: "Onsite labor",
+        });
+
+        const result = await ticketsHandler.handleCall(
+          "syncro_tickets_add_line_item",
+          {
+            ticket_id: 17,
+            name: "Onsite labor",
+            description: "1h onsite",
+            price_retail: 150,
+          }
+        );
+
+        expect(guardModule.guardWrite).toHaveBeenCalledWith(
+          'Add 1 x "Onsite labor" at 150 each to Syncro ticket 17?'
+        );
+        expect(restModule.syncroRest).toHaveBeenCalledWith(
+          "/tickets/17/add_line_item",
+          {
+            method: "POST",
+            body: {
+              name: "Onsite labor",
+              description: "1h onsite",
+              quantity: 1,
+              price_retail: 150,
+              price_cost: undefined,
+              product_id: undefined,
+              taxable: undefined,
+            },
+          }
+        );
+        const parsed = JSON.parse((result.content[0] as { text: string }).text);
+        expect(parsed.ticket_id).toBe(17);
+      });
+
+      it("does not call Syncro when the user declines", async () => {
+        vi.mocked(guardModule.guardWrite).mockResolvedValue({
+          content: [{ type: "text", text: "Cancelled" }],
+        });
+
+        await ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+          ticket_id: 17,
+          name: "x",
+          description: "y",
+        });
+
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
       });
     });
 
