@@ -7,7 +7,8 @@ import { timeHandler } from "../../src/domains/time.js";
 import * as restModule from "../../src/utils/rest.js";
 import * as guardModule from "../../src/utils/write-guard.js";
 
-vi.mock("../../src/utils/rest.js", () => ({
+vi.mock("../../src/utils/rest.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/utils/rest.js")>()),
   syncroRest: vi.fn(),
 }));
 

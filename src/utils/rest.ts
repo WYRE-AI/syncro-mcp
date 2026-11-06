@@ -15,6 +15,9 @@
 
 import { getClient } from "./client.js";
 
+/** Deadline for one Syncro REST call, so a stalled request cannot hang a tool. */
+export const REST_TIMEOUT_MS = 30_000;
+
 export type RestMethod = "GET" | "POST" | "PUT" | "PATCH";
 
 export interface RestOptions {
@@ -33,6 +36,18 @@ export class SyncroRestError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+/**
+ * Validates a tool-supplied ID before it is interpolated into a REST path.
+ * Tool arguments are not schema-checked at runtime, so a string such as
+ * "../tickets" would otherwise change which endpoint is called.
+ */
+export function pathId(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return value;
 }
 
 function describeErrorBody(body: unknown): string {
@@ -64,19 +79,36 @@ export async function syncroRest<T>(
     }
   }
 
-  const response = await fetch(url.toString(), {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-
-  // Read once as text: a fetch body is single-use, and Syncro error pages are
-  // not always JSON.
-  const raw = await response.text();
+  let response: Response;
+  let raw: string;
+  try {
+    response = await fetch(url.toString(), {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(REST_TIMEOUT_MS),
+    });
+    // Read once as text: a fetch body is single-use, and Syncro error pages
+    // are not always JSON.
+    raw = await response.text();
+  } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      const outcome =
+        method === "GET"
+          ? ""
+          : " The change may or may not have been applied; check Syncro before retrying.";
+      throw new SyncroRestError(
+        `Syncro API ${method} ${path} timed out after ${REST_TIMEOUT_MS / 1000}s.${outcome}`,
+        0,
+        undefined
+      );
+    }
+    throw err;
+  }
   let parsed: unknown = raw;
   try {
     parsed = raw.trim() === "" ? {} : JSON.parse(raw);

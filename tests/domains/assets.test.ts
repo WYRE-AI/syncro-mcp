@@ -15,7 +15,8 @@ vi.mock("../../src/utils/client.js", () => ({
   clearClient: vi.fn(),
 }));
 
-vi.mock("../../src/utils/rest.js", () => ({
+vi.mock("../../src/utils/rest.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/utils/rest.js")>()),
   syncroRest: vi.fn(),
 }));
 

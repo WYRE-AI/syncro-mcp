@@ -98,25 +98,25 @@ export async function confirmWrite(
   const server = getServerRef();
   if (!server) return "unavailable";
 
-  let result;
-  try {
-    result = await server.elicitInput({
-      message,
-      requestedSchema: {
-        type: "object" as const,
-        properties: {
-          confirm: {
-            type: "boolean" as const,
-            title: "Confirm",
-            description: "Confirm this action",
-          },
+  // Fall back only when the client cannot show a form. Once a prompt is
+  // supported, a failed request (timeout, transport error) must not let the
+  // write through unconfirmed, so the error propagates.
+  if (!server.getClientCapabilities()?.elicitation?.form) return "unavailable";
+
+  const result = await server.elicitInput({
+    message,
+    requestedSchema: {
+      type: "object" as const,
+      properties: {
+        confirm: {
+          type: "boolean" as const,
+          title: "Confirm",
+          description: "Confirm this action",
         },
-        required: ["confirm"],
       },
-    });
-  } catch {
-    return "unavailable";
-  }
+      required: ["confirm"],
+    },
+  });
 
   if (result.action === "accept" && result.content?.confirm === true) {
     return "confirmed";

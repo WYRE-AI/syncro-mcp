@@ -11,8 +11,13 @@ vi.mock("../../src/utils/server-ref.js", () => ({
   getServerRef: vi.fn(),
 }));
 
+const FORM = { elicitation: { form: {} } };
+
 function serverReturning(result: unknown) {
-  return { elicitInput: vi.fn().mockResolvedValue(result) } as never;
+  return {
+    getClientCapabilities: () => FORM,
+    elicitInput: vi.fn().mockResolvedValue(result),
+  } as never;
 }
 
 describe("confirmWrite", () => {
@@ -25,11 +30,22 @@ describe("confirmWrite", () => {
     await expect(confirmWrite("ok?")).resolves.toBe("unavailable");
   });
 
-  it("is unavailable when the client cannot elicit", async () => {
+  it("is unavailable when the client cannot elicit a form", async () => {
+    const elicitInput = vi.fn();
     vi.mocked(serverRef.getServerRef).mockReturnValue({
-      elicitInput: vi.fn().mockRejectedValue(new Error("Client does not support elicitation")),
+      getClientCapabilities: () => ({}),
+      elicitInput,
     } as never);
     await expect(confirmWrite("ok?")).resolves.toBe("unavailable");
+    expect(elicitInput).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failed prompt when the client supports forms", async () => {
+    vi.mocked(serverRef.getServerRef).mockReturnValue({
+      getClientCapabilities: () => FORM,
+      elicitInput: vi.fn().mockRejectedValue(new Error("Request timed out")),
+    } as never);
+    await expect(confirmWrite("ok?")).rejects.toThrow("Request timed out");
   });
 
   it("is confirmed only on accept with confirm=true", async () => {

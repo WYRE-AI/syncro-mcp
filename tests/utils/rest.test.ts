@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { syncroRest, SyncroRestError } from "../../src/utils/rest.js";
+import { pathId, syncroRest, SyncroRestError } from "../../src/utils/rest.js";
 import * as clientModule from "../../src/utils/client.js";
 
 vi.mock("../../src/utils/client.js", () => ({
@@ -92,4 +92,32 @@ describe("utils/rest.ts", () => {
     fetchMock.mockResolvedValue(new Response("<html>login</html>", { status: 200 }));
     await expect(syncroRest("/x")).rejects.toThrow(/Expected JSON/);
   });
+
+  it("passes an abort signal so a stalled call times out", async () => {
+    fetchMock.mockResolvedValue(mockResponse(200, "{}"));
+    await syncroRest("/x");
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("reports an unknown outcome when a write times out", async () => {
+    fetchMock.mockRejectedValue(
+      Object.assign(new Error("timed out"), { name: "TimeoutError" })
+    );
+    await expect(syncroRest("/x", { method: "POST" })).rejects.toThrow(
+      /timed out.*may or may not have been applied/
+    );
+  });
+});
+
+describe("pathId", () => {
+  it("accepts a positive integer", () => {
+    expect(pathId(42, "asset_id")).toBe(42);
+  });
+
+  it.each(["5", "../tickets", 1.5, 0, -1, NaN, undefined])(
+    "rejects %j",
+    (value) => {
+      expect(() => pathId(value, "asset_id")).toThrow(/asset_id/);
+    }
+  );
 });

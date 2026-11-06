@@ -7,7 +7,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
-import { syncroRest } from "../utils/rest.js";
+import { pathId, syncroRest } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
 import {
   READ_ONLY,
@@ -271,7 +271,7 @@ async function handleCall(
     }
 
     case "syncro_assets_get_patches": {
-      const assetId = args.asset_id as number;
+      const assetId = pathId(args.asset_id, "asset_id");
       const patches = await syncroRest<Record<string, unknown>>(
         `/customer_assets/${assetId}/patches`
       );
@@ -281,7 +281,7 @@ async function handleCall(
     }
 
     case "syncro_assets_list_installed_applications": {
-      const assetId = args.asset_id as number;
+      const assetId = pathId(args.asset_id, "asset_id");
       const response = await syncroRest<{
         installed_applications?: unknown[];
         meta?: unknown;
@@ -339,8 +339,8 @@ async function handleCall(
     }
 
     case "syncro_assets_set_policy_folder": {
-      const assetId = args.asset_id as number;
-      const folderId = args.policy_folder_id as number;
+      const assetId = pathId(args.asset_id, "asset_id");
+      const folderId = pathId(args.policy_folder_id, "policy_folder_id");
       const blocked = await guardWrite(
         `Move Syncro asset ${assetId} into policy folder ${folderId}? This changes the RMM policy applied to the device.`
       );
@@ -361,7 +361,7 @@ async function handleCall(
     }
 
     case "syncro_assets_run_script": {
-      const assetId = args.asset_id as number;
+      const assetId = pathId(args.asset_id, "asset_id");
       const scriptId = args.script_id as number;
       const runAt = args.run_at as string | undefined;
       const blocked = await guardWrite(

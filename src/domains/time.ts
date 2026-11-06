@@ -14,7 +14,7 @@
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
-import { syncroRest } from "../utils/rest.js";
+import { pathId, syncroRest } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
 import {
   READ_ONLY,
@@ -180,7 +180,7 @@ async function handleCall(
     }
 
     case "syncro_time_log_entry": {
-      const ticketId = args.ticket_id as number;
+      const ticketId = pathId(args.ticket_id, "ticket_id");
       if (args.end_at === undefined && args.duration_minutes === undefined) {
         return error("Provide either end_at or duration_minutes.");
       }
@@ -251,7 +251,7 @@ async function handleCall(
     }
 
     case "syncro_time_set_billable": {
-      const timerId = args.timer_id as number;
+      const timerId = pathId(args.timer_id, "timer_id");
       const billable = args.billable as boolean;
       const blocked = await guardWrite(
         `Mark Syncro time entry ${timerId} as ${billable ? "billable" : "non-billable"}?`

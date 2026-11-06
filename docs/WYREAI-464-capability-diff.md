@@ -49,7 +49,7 @@ This doc scores that coverage against the six MSP jobs in WYREAI-464: `create_ti
 
 ## Job matrix
 
-| Job | Status | How an agent does it through Conduit |
+| Job | Status | How an agent can do it through Conduit after follow-up 3 |
 |---|---|---|
 | **create_ticket** | **Covered** | Find the customer (official `list_customers` / `search`, or `syncro_customers_search`). Create it with official `create_ticket` or `syncro_tickets_create`, change status or assignee with `update_ticket` / `syncro_tickets_update`, and add notes with `add_ticket_comment` / `syncro_tickets_add_comment`. The sidecar tools are annotated as writes. Conduit classifies the official tools on its side, and its gateway confirm guard applies to write-classified tools (see follow-up 3). |
 | **log_time** | **Covered** | `syncro_time_log_entry` (`POST /tickets/{id}/timer_entry`, then `PATCH /ticket_timers/{id}` with `billable`). Fix the flag with `syncro_time_set_billable`. Review with `syncro_time_list_entries`. Official `update_timer_entry` / `charge_timer_entry` correct an entry or charge it. Both new writes ask for elicitation confirmation. |
@@ -58,11 +58,13 @@ This doc scores that coverage against the six MSP jobs in WYREAI-464: `create_ti
 | **patch_device** | **Covered within API limits** | Check with `syncro_assets_get_patches` (missing, failed, or rejected KBs). Put the device on the right patch policy with `syncro_assets_list_policy_folders` and `syncro_assets_set_policy_folder`. Remediate with `syncro_assets_run_script` (`POST /rmm/public_scripts/{asset_id}/schedule`, run once now or later; destructive, needs confirmation). **Not possible through the API:** approving or installing a specific KB (no endpoint), recurring script schedules (the API returns 422 "recurring schedules are not supported through the api"), and listing scripts (no endpoint, so the caller supplies `script_id`). |
 | **backup_check** | **Deferred: no backup API** | The Syncro REST API has no backup-job or backup-status endpoint. Searching swagger.json for "backup" finds only Syncro Backup billing fields on `/schedules` (`syncro_backup_billing_type`, …). Partial evidence through existing tools: official `list_alerts` (RMM alerts raised by backup monitors) and `syncro_assets_list_installed_applications` (is a backup agent installed). Revisit when Syncro adds a backup endpoint, or route the check to the backup vendor's connector. |
 
-Score: **5 of 6 jobs covered** (create_ticket, log_time, invoice, onboard_user, patch_device). **backup_check is deferred** with API evidence.
+Score: **5 of 6 jobs can be covered through Conduit after follow-up 3** (create_ticket, log_time, invoice, onboard_user, patch_device). **backup_check is deferred** with API evidence.
 
 ## Classification of the new tools
 
 Every tool the sidecar lists carries MCP annotations. `tests/classification.test.ts` fails if any tool is unclassified or changes class.
+
+When the client does not support form elicitation, the sidecar permits non-destructive writes without confirmation and relies on Conduit's gateway confirm guard. If a supported prompt fails (for example, it times out), the write does not run.
 
 | Tool | Class | Confirmation |
 |---|---|---|
@@ -103,7 +105,7 @@ Existing tools are now classified too: every list/get/search tool and `syncro_na
 > - **patch_device:** `syncro_assets_get_patches`, `syncro_assets_list_policy_folders`, `syncro_assets_set_policy_folder`, `syncro_assets_run_script` (destructive, confirm-gated).
 > - **backup_check evidence:** `syncro_assets_list_installed_applications`.
 >
-> All 30 sidecar tools are classified read/write/destructive, and the new writes confirm through elicitation.
+> All 30 sidecar tools are classified read/write/destructive. New writes request confirmation through elicitation; when the client cannot elicit, the sidecar permits non-destructive writes without confirmation.
 > **Deferred, with API evidence:** backup status (no endpoint in swagger), KB-level patch approval (no endpoint), recurring script schedules (API returns 422), asset-to-contact assignment (no `contact_id` on asset PUT), portal invites (Global Admin + password).
 > **Finding:** node-syncro's timer methods call endpoints that are not in Syncro's swagger.
 > Full table: `docs/WYREAI-464-capability-diff.md`.

@@ -9,7 +9,7 @@ import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
 import { elicitSelection } from "../utils/elicitation.js";
 import { buildTicketCard, TICKET_CARD_META } from "../card.builder.js";
-import { syncroRest } from "../utils/rest.js";
+import { pathId, syncroRest } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
 import {
   READ_ONLY,
@@ -379,7 +379,7 @@ async function handleCall(
     }
 
     case "syncro_tickets_add_line_item": {
-      const ticketId = args.ticket_id as number;
+      const ticketId = pathId(args.ticket_id, "ticket_id");
       const quantity = (args.quantity as number | undefined) ?? 1;
       const price =
         args.price_retail !== undefined ? ` at ${args.price_retail} each` : "";
