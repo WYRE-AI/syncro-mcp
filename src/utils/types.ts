@@ -30,13 +30,19 @@ export type DomainName =
   | "tickets"
   | "assets"
   | "contacts"
-  | "invoices";
+  | "invoices"
+  | "time";
 
 /**
  * Check if a string is a valid domain name
  */
 export function isDomainName(value: string): value is DomainName {
-  return ["customers", "tickets", "assets", "contacts", "invoices"].includes(
-    value
-  );
+  return [
+    "customers",
+    "tickets",
+    "assets",
+    "contacts",
+    "invoices",
+    "time",
+  ].includes(value);
 }

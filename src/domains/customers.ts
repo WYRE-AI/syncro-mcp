@@ -7,6 +7,10 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import {
+  ADDITIVE_WRITE,
+  READ_ONLY,
+} from "../utils/annotations.js";
 import { elicitText } from "../utils/elicitation.js";
 
 /**
@@ -18,6 +22,7 @@ function getTools(): Tool[] {
       name: "syncro_customers_list",
       description:
         "List customers in Syncro. Can filter by query, email, phone, or include disabled customers.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -56,6 +61,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_customers_get",
       description: "Get details for a specific customer by their ID",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -70,6 +76,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_customers_create",
       description: "Create a new customer in Syncro",
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -128,6 +135,7 @@ function getTools(): Tool[] {
       name: "syncro_customers_search",
       description:
         "Search for customers using a query string. Matches against business name, contact name, email, and other fields.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {

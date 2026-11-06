@@ -9,6 +9,13 @@ import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
 import { elicitSelection } from "../utils/elicitation.js";
 import { buildTicketCard, TICKET_CARD_META } from "../card.builder.js";
+import { syncroRest } from "../utils/rest.js";
+import { guardWrite } from "../utils/write-guard.js";
+import {
+  READ_ONLY,
+  ADDITIVE_WRITE,
+  IDEMPOTENT_WRITE,
+} from "../utils/annotations.js";
 
 /**
  * Get ticket domain tools
@@ -19,6 +26,7 @@ function getTools(): Tool[] {
       name: "syncro_tickets_list",
       description:
         "List tickets in Syncro. Can filter by customer, contact, status, user, problem type, or resolved state.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -71,6 +79,7 @@ function getTools(): Tool[] {
       description:
         "Get details for a specific ticket by its ID, including comments",
       _meta: TICKET_CARD_META,
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -85,6 +94,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_tickets_create",
       description: "Create a new ticket in Syncro",
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -131,6 +141,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_tickets_update",
       description: "Update an existing ticket in Syncro",
+      annotations: IDEMPOTENT_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -166,6 +177,7 @@ function getTools(): Tool[] {
       name: "syncro_tickets_add_comment",
       description: "Add a comment to an existing ticket",
       _meta: TICKET_CARD_META,
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -191,6 +203,29 @@ function getTools(): Tool[] {
           },
         },
         required: ["ticket_id", "body"],
+      },
+    },
+    {
+      name: "syncro_tickets_add_line_item",
+      description:
+        "⚠ HIGH-IMPACT. Add a billable line item (labor, part, or fee) to a ticket so it is carried onto the ticket's invoice. Use product_id for a catalog item, or name + price_retail for a manual charge. Not idempotent: a retry adds the charge twice. Confirm with the user before invoking.",
+      annotations: ADDITIVE_WRITE,
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          ticket_id: { type: "number", description: "The ticket ID (required)" },
+          name: { type: "string", description: "Line item name (required)" },
+          description: {
+            type: "string",
+            description: "Line item description (required by Syncro)",
+          },
+          quantity: { type: "number", description: "Quantity (default: 1)" },
+          price_retail: { type: "number", description: "Unit price charged to the customer" },
+          price_cost: { type: "number", description: "Unit cost" },
+          product_id: { type: "number", description: "Catalog product ID" },
+          taxable: { type: "boolean", description: "Whether the line is taxable" },
+        },
+        required: ["ticket_id", "name", "description"],
       },
     },
   ];
@@ -340,6 +375,37 @@ async function handleCall(
 
       return {
         content: [{ type: "text", text: JSON.stringify(ticket, null, 2) }],
+      };
+    }
+
+    case "syncro_tickets_add_line_item": {
+      const ticketId = args.ticket_id as number;
+      const quantity = (args.quantity as number | undefined) ?? 1;
+      const price =
+        args.price_retail !== undefined ? ` at ${args.price_retail} each` : "";
+      const blocked = await guardWrite(
+        `Add ${quantity} x "${args.name}"${price} to Syncro ticket ${ticketId}?`
+      );
+      if (blocked) return blocked;
+
+      const lineItem = await syncroRest<Record<string, unknown>>(
+        `/tickets/${ticketId}/add_line_item`,
+        {
+          method: "POST",
+          body: {
+            name: args.name,
+            description: args.description,
+            quantity,
+            price_retail: args.price_retail,
+            price_cost: args.price_cost,
+            product_id: args.product_id,
+            taxable: args.taxable,
+          },
+        }
+      );
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(lineItem, null, 2) }],
       };
     }
 
