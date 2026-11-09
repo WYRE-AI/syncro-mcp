@@ -46,8 +46,8 @@
   },
   "homepage": "https://github.com/WYRE-AI/syncro-mcp#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.0",
-    "@wyre-ai/node-syncro": "^1.0.5"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@wyre-ai/node-syncro": "^1.1.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
