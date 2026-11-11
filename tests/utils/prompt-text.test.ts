@@ -185,7 +185,9 @@ describe("quoteInFull", () => {
     }
 
     expect(leaks).toEqual([]);
-  });
+    // About 1 s locally; a shared CI runner can take several times that, so
+    // the default 5 s limit is too tight for a sweep of 1,114,112 code points.
+  }, 60_000);
 
   it.each([42, null, undefined, true, { a: 1 }, ["x"]])(
     "refuses the non-string value %j",
