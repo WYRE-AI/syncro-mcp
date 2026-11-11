@@ -67,10 +67,12 @@ const ISO_TIMESTAMP =
 /** Whether a matched {@link ISO_TIMESTAMP} names a real date and a time of day in range. */
 function isRealDateTime(groups: Record<string, string | undefined>): boolean {
   const n = (name: string) => Number(groups[name] ?? 0);
-  const date = new Date(Date.UTC(n("year"), n("month") - 1, n("day")));
+  // A month or day out of range makes Date roll over into another month
+  // (the 31st of February becomes March, day 0 the month before), so the
+  // month coming back unchanged proves both the month and the day are real.
+  const rolled = new Date(Date.UTC(n("year"), n("month") - 1, n("day")));
   return (
-    date.getUTCMonth() === n("month") - 1 &&
-    date.getUTCDate() === n("day") &&
+    rolled.getUTCMonth() === n("month") - 1 &&
     n("hour") <= 23 &&
     n("minute") <= 59 &&
     n("second") <= 59 &&
