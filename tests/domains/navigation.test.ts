@@ -38,6 +38,13 @@ vi.mock("../../src/domains/contacts.js", () => ({
   },
 }));
 
+vi.mock("../../src/domains/time.js", () => ({
+  timeHandler: {
+    getTools: vi.fn().mockReturnValue([{ name: "syncro_time_list_entries" }]),
+    handleCall: vi.fn(),
+  },
+}));
+
 vi.mock("../../src/domains/invoices.js", () => ({
   invoicesHandler: {
     getTools: vi.fn().mockReturnValue([{ name: "syncro_invoices_list" }]),
@@ -60,6 +67,7 @@ describe("domains/index.ts", () => {
         "assets",
         "contacts",
         "invoices",
+        "time",
       ]);
     });
 
@@ -102,6 +110,13 @@ describe("domains/index.ts", () => {
       expect(handler).toBeDefined();
       const tools = handler.getTools();
       expect(tools).toContainEqual({ name: "syncro_contacts_list" });
+    });
+
+    it("should load the time handler", async () => {
+      const handler = await getDomainHandler("time");
+      const tools = handler.getTools();
+
+      expect(tools).toContainEqual({ name: "syncro_time_list_entries" });
     });
 
     it("should load the invoices handler", async () => {

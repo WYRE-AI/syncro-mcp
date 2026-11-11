@@ -6,7 +6,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getCredentials,
   getClient,
+  getWriteClient,
   clearClient,
+  isValidSubdomain,
   runWithClientScope,
 } from "../../src/utils/client.js";
 import { credentialStore } from "../../src/utils/credential-store.js";
@@ -200,6 +202,109 @@ describe("client.ts", () => {
       // The placeholder never reached the SDK constructor.
       expect(mockSyncroClient).not.toHaveBeenCalled();
     });
+
+    // The subdomain is placed in the host, so anything that is not one DNS
+    // label could redirect the API key to another host.
+    it.each([
+      "evil.example/x#",
+      "evil.example#",
+      "evil.example",
+      "co.syncromsp.com",
+      "evil.example/",
+      "evil.example?",
+      "user@evil.example",
+      "evil.example:8443",
+      "acme\\evil",
+      "acme evil",
+      "-acme",
+      "acme-",
+      "a".repeat(64),
+    ])("should reject the subdomain %j without building a client", async (subdomain) => {
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
+      const mockSyncroClient = vi.mocked(SyncroClient);
+
+      process.env.SYNCRO_API_KEY = "test-api-key";
+      process.env.SYNCRO_SUBDOMAIN = subdomain;
+
+      const err = await getClient().catch((e: Error) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("single subdomain label");
+      expect((err as Error).message).not.toContain(subdomain);
+      expect(mockSyncroClient).not.toHaveBeenCalled();
+    });
+
+    it.each(["acme", "Acme", "my-co", "co2", "a", "a".repeat(63)])(
+      "should accept the subdomain %j",
+      async (subdomain) => {
+        process.env.SYNCRO_API_KEY = "test-api-key";
+        process.env.SYNCRO_SUBDOMAIN = subdomain;
+
+        await expect(getClient()).resolves.toBeDefined();
+      }
+    );
+
+    it("should reject a bad subdomain that arrives with gateway request credentials", async () => {
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
+      const mockSyncroClient = vi.mocked(SyncroClient);
+
+      await credentialStore.run(
+        { apiKey: "header-key", subdomain: "evil.example/x#" },
+        () => runWithClientScope(() => expect(getClient()).rejects.toThrow("single subdomain label"))
+      );
+      expect(mockSyncroClient).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getWriteClient", () => {
+    beforeEach(() => {
+      process.env.SYNCRO_API_KEY = "test-api-key";
+      process.env.SYNCRO_SUBDOMAIN = "acme";
+    });
+
+    it("builds a client that makes a single attempt, and leaves the read client's retries alone", async () => {
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
+      const mockSyncroClient = vi.mocked(SyncroClient);
+
+      await getClient();
+      await getWriteClient();
+
+      expect(mockSyncroClient).toHaveBeenNthCalledWith(1, {
+        apiKey: "test-api-key",
+        subdomain: "acme",
+      });
+      expect(mockSyncroClient).toHaveBeenNthCalledWith(2, {
+        apiKey: "test-api-key",
+        subdomain: "acme",
+        rateLimit: { maxRetries: 0 },
+      });
+    });
+
+    it("is a different client from the read client, and is cached", async () => {
+      const write1 = await getWriteClient();
+      const write2 = await getWriteClient();
+
+      expect(write1).toBe(write2);
+      expect(write1).not.toBe(await getClient());
+    });
+
+    it("drops both cached clients when the credentials change", async () => {
+      const read = await getClient();
+      const write = await getWriteClient();
+
+      process.env.SYNCRO_API_KEY = "rotated-key";
+
+      expect(await getWriteClient()).not.toBe(write);
+      expect(await getClient()).not.toBe(read);
+    });
+
+    it("applies the same credential checks as getClient", async () => {
+      process.env.SYNCRO_SUBDOMAIN = "evil.example/x#";
+
+      await expect(getWriteClient()).rejects.toThrow("single subdomain label");
+      delete process.env.SYNCRO_API_KEY;
+      await expect(getWriteClient()).rejects.toThrow("No API credentials provided");
+    });
   });
 
   describe("runWithClientScope (tenant isolation)", () => {
@@ -270,6 +375,25 @@ describe("client.ts", () => {
         apiKey: "tenant-b-key",
         subdomain: "tenant-b",
       });
+    });
+  });
+
+  describe("isValidSubdomain", () => {
+    it.each(["acme", "my-company", "A1", "a".repeat(63)])("accepts %s", (value) => {
+      expect(isValidSubdomain(value)).toBe(true);
+    });
+
+    it.each([
+      "",
+      "evil.example",
+      "evil.example/x#",
+      "-acme",
+      "acme-",
+      "a".repeat(64),
+      "acme\n",
+      "${user_config.syncro_subdomain}",
+    ])("rejects %j", (value) => {
+      expect(isValidSubdomain(value)).toBe(false);
     });
   });
 

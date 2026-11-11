@@ -34,6 +34,14 @@ import type { SyncroClient } from "@wyre-ai/node-syncro";
 import { getRequestCredentials } from "./credential-store.js";
 import { cleanCredential } from "./clean-credential.js";
 
+/** One DNS label: letters, digits and inner hyphens, at most 63 characters. */
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+
+/** Whether a configured subdomain is one the client accepts as a host label. */
+export function isValidSubdomain(subdomain: string): boolean {
+  return DNS_LABEL.test(subdomain);
+}
+
 export interface SyncroCredentials {
   apiKey: string;
   subdomain?: string;
@@ -46,12 +54,15 @@ export interface SyncroCredentials {
  * or invalidate each other's cached client.
  */
 interface ClientScope {
+  /** Client for reads: the SDK default, which retries a 429 or 5xx. */
   client: SyncroClient | null;
+  /** Client for writes: one attempt only, see {@link getWriteClient}. */
+  writeClient: SyncroClient | null;
   credentials: SyncroCredentials | null;
 }
 
 function createScope(): ClientScope {
-  return { client: null, credentials: null };
+  return { client: null, writeClient: null, credentials: null };
 }
 
 const clientScopeStore = new AsyncLocalStorage<ClientScope>();
@@ -127,10 +138,8 @@ export function getCredentials(): SyncroCredentials | null {
   return { apiKey, subdomain };
 }
 
-/**
- * Get or create the Syncro client (lazy initialization)
- */
-export async function getClient(): Promise<SyncroClient> {
+/** The configured credentials, or an error saying what is missing or invalid. */
+function requireCredentials(): Required<SyncroCredentials> {
   const creds = getCredentials();
 
   if (!creds) {
@@ -152,29 +161,68 @@ export async function getClient(): Promise<SyncroClient> {
     );
   }
 
+  // The subdomain becomes the host (`https://<subdomain>.syncromsp.com`), so a
+  // value such as "evil.example/x#" would send the API key to another host.
+  // Both the SDK client and the REST helper get their host from this client,
+  // so this is the one place that has to check it. The value is not echoed.
+  if (!isValidSubdomain(creds.subdomain)) {
+    throw new Error(
+      "SYNCRO_SUBDOMAIN must be a single subdomain label of letters, digits " +
+        'and hyphens (e.g. "acme" for acme.syncromsp.com), not a host name or URL.'
+    );
+  }
+
+  return { apiKey: creds.apiKey, subdomain: creds.subdomain };
+}
+
+/**
+ * Get the cached client in `slot`, creating it on first use. A change of
+ * credentials drops both cached clients first.
+ */
+async function cachedClient(
+  slot: "client" | "writeClient",
+  rateLimit?: { maxRetries: number }
+): Promise<SyncroClient> {
+  const creds = requireCredentials();
   const scope = getScope();
 
-  // If credentials changed, invalidate the cached client
   if (
-    scope.client &&
     scope.credentials &&
     (creds.apiKey !== scope.credentials.apiKey ||
       creds.subdomain !== scope.credentials.subdomain)
   ) {
     scope.client = null;
+    scope.writeClient = null;
   }
 
-  if (!scope.client) {
+  let client = scope[slot];
+  if (!client) {
     // Lazy import the library
     const { SyncroClient } = await import("@wyre-ai/node-syncro");
-    scope.client = new SyncroClient({
-      apiKey: creds.apiKey,
-      subdomain: creds.subdomain,
-    });
+    client = new SyncroClient({ ...creds, ...(rateLimit ? { rateLimit } : {}) });
+    scope[slot] = client;
     scope.credentials = creds;
   }
 
-  return scope.client;
+  return client;
+}
+
+/**
+ * Get or create the Syncro client for reads (lazy initialization). The SDK
+ * retries a 429 or 5xx on it, which is safe for a GET.
+ */
+export function getClient(): Promise<SyncroClient> {
+  return cachedClient("client");
+}
+
+/**
+ * Get or create the Syncro client for writes. The SDK resends a request after
+ * a 429 or 5xx, which for a POST can send an email or create a record more
+ * than once, so this client makes exactly one attempt. The SDK keeps a rate
+ * limit budget per client, so reads and writes each count against their own.
+ */
+export function getWriteClient(): Promise<SyncroClient> {
+  return cachedClient("writeClient", { maxRetries: 0 });
 }
 
 /**
@@ -183,5 +231,6 @@ export async function getClient(): Promise<SyncroClient> {
 export function clearClient(): void {
   const scope = getScope();
   scope.client = null;
+  scope.writeClient = null;
   scope.credentials = null;
 }

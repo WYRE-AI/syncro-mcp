@@ -7,6 +7,12 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import { pathId } from "../utils/rest.js";
+import { sdkWrite } from "../utils/write-outcome.js";
+import {
+  ADDITIVE_WRITE,
+  READ_ONLY,
+} from "../utils/annotations.js";
 
 /**
  * Get contact domain tools
@@ -17,6 +23,7 @@ function getTools(): Tool[] {
       name: "syncro_contacts_list",
       description:
         "List contacts in Syncro. Can filter by customer ID or search query.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -42,6 +49,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_contacts_get",
       description: "Get details for a specific contact by their ID",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -56,6 +64,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_contacts_create",
       description: "Create a new contact in Syncro",
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -148,7 +157,7 @@ async function handleCall(
     }
 
     case "syncro_contacts_get": {
-      const contactId = args.contact_id as number;
+      const contactId = pathId(args.contact_id, "contact_id");
       const contact = await client.contacts.get(contactId);
 
       return {
@@ -157,19 +166,21 @@ async function handleCall(
     }
 
     case "syncro_contacts_create": {
-      const contact = await client.contacts.create({
-        customer_id: args.customer_id as number,
-        name: args.name as string,
-        email: args.email as string | undefined,
-        phone: args.phone as string | undefined,
-        mobile: args.mobile as string | undefined,
-        address1: args.address1 as string | undefined,
-        address2: args.address2 as string | undefined,
-        city: args.city as string | undefined,
-        state: args.state as string | undefined,
-        zip: args.zip as string | undefined,
-        notes: args.notes as string | undefined,
-      });
+      const contact = await sdkWrite((sdk) =>
+        sdk.contacts.create({
+          customer_id: args.customer_id as number,
+          name: args.name as string,
+          email: args.email as string | undefined,
+          phone: args.phone as string | undefined,
+          mobile: args.mobile as string | undefined,
+          address1: args.address1 as string | undefined,
+          address2: args.address2 as string | undefined,
+          city: args.city as string | undefined,
+          state: args.state as string | undefined,
+          zip: args.zip as string | undefined,
+          notes: args.notes as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(contact, null, 2) }],

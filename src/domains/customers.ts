@@ -7,6 +7,12 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import { pathId } from "../utils/rest.js";
+import { sdkWrite } from "../utils/write-outcome.js";
+import {
+  ADDITIVE_WRITE,
+  READ_ONLY,
+} from "../utils/annotations.js";
 import { elicitText } from "../utils/elicitation.js";
 
 /**
@@ -18,6 +24,7 @@ function getTools(): Tool[] {
       name: "syncro_customers_list",
       description:
         "List customers in Syncro. Can filter by query, email, phone, or include disabled customers.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -56,6 +63,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_customers_get",
       description: "Get details for a specific customer by their ID",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -70,6 +78,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_customers_create",
       description: "Create a new customer in Syncro",
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -128,6 +137,7 @@ function getTools(): Tool[] {
       name: "syncro_customers_search",
       description:
         "Search for customers using a query string. Matches against business name, contact name, email, and other fields.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -205,7 +215,7 @@ async function handleCall(
     }
 
     case "syncro_customers_get": {
-      const customerId = args.customer_id as number;
+      const customerId = pathId(args.customer_id, "customer_id");
       const customer = await client.customers.get(customerId);
 
       return {
@@ -214,20 +224,22 @@ async function handleCall(
     }
 
     case "syncro_customers_create": {
-      const customer = await client.customers.create({
-        business_name: args.business_name as string | undefined,
-        firstname: args.firstname as string | undefined,
-        lastname: args.lastname as string | undefined,
-        email: args.email as string | undefined,
-        phone: args.phone as string | undefined,
-        mobile: args.mobile as string | undefined,
-        address: args.address as string | undefined,
-        address_2: args.address_2 as string | undefined,
-        city: args.city as string | undefined,
-        state: args.state as string | undefined,
-        zip: args.zip as string | undefined,
-        notes: args.notes as string | undefined,
-      });
+      const customer = await sdkWrite((sdk) =>
+        sdk.customers.create({
+          business_name: args.business_name as string | undefined,
+          firstname: args.firstname as string | undefined,
+          lastname: args.lastname as string | undefined,
+          email: args.email as string | undefined,
+          phone: args.phone as string | undefined,
+          mobile: args.mobile as string | undefined,
+          address: args.address as string | undefined,
+          address_2: args.address_2 as string | undefined,
+          city: args.city as string | undefined,
+          state: args.state as string | undefined,
+          zip: args.zip as string | undefined,
+          notes: args.notes as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(customer, null, 2) }],

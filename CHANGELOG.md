@@ -2,6 +2,79 @@
 
 ### Security
 
+- **Every id that reaches a request path is validated, including in the
+  SDK-backed tools.** Only the REST-helper tools checked path ids. The SDK
+  builds paths such as `/tickets/<id>/comment` with no encoding and `fetch`
+  resolves `..` segments, so a crafted string id in `syncro_tickets_get`,
+  `_update` or `_add_comment`, `syncro_customers_get`, `syncro_contacts_get`,
+  `syncro_assets_get` or `syncro_invoices_get` could send a call to a
+  different endpoint than the tool names, including one this server guards
+  with `confirm`. Each of those ids now goes through `pathId` first, as does
+  the id of a time entry that Syncro returns and is then used in a path.
+  `tests/domains/path-ids.test.ts` has one row per (tool, id argument), so
+  removing any single check fails a test; it includes the seven existing
+  checks that had no test (`time_log_entry` `ticket_id`, `set_billable`
+  `timer_id`, `get_patches` and `list_installed_applications` `asset_id`,
+  `set_policy_folder` `asset_id` and `policy_folder_id`, `run_script`
+  `asset_id`).
+
+- **Time entry notes and line item name and description are shown in full,
+  or refused.** They were shown cut to 200 characters on one line while the
+  request sent them whole. Every free-text value that is sent to Syncro now goes
+  through `quoteInFull`, so what is approved is exactly what is sent:
+  `syncro_time_log_entry` `notes` and `syncro_tickets_add_line_item`
+  `description` (up to 1000 characters, the bound the invoice email `message`
+  already had, now `MAX_LONG_TEXT_PROMPT` in `src/utils/prompt-text.ts`) and
+  `name` (up to 200). A value that is not a string, is over its limit or
+  contains a character the prompt cannot show is refused before the prompt and
+  before any request. `quote`, which cleans and cuts, is left only for values
+  that are not sent as they are, such as a name inside an error message.
+  Table-driven tests now pin that the sent value equals the shown value for
+  time `notes`, line item `name` and `description`, every script runtime
+  variable, and invoice `cc_emails`, `subject` and `message`; trimming or cutting
+  any of them between the prompt and the request fails a test.
+
+- **A destructive prompt now shows exactly what is sent, or the call is
+  refused.** `syncro_assets_run_script` (`run_as`, variable names and values)
+  and `syncro_invoices_email` (`cc_emails`, `subject`, `message`) used to
+  collapse whitespace and drop control characters for display while sending the
+  raw value, and measured length limits on the collapsed text. They now refuse
+  a value that is not a string or that contains a control character other than
+  newline, carriage return and tab; a format, private-use, unassigned or
+  surrogate character; any space or separator other than the plain space
+  (no-break and other wide or narrow spaces, line and paragraph separators); or
+  a character that draws nothing: any default-ignorable code point (variation
+  selectors such as U+FE0F and U+E0100 to U+E01EF, the Mongolian free variation
+  selectors, the Hangul and Khmer fillers, U+034F) and the Braille blank
+  U+2800. A carriage return is accepted because the prompt shows it as the
+  visible escape `\r`, exactly as it is sent, so CRLF line endings in an email
+  message or a script variable work. Length limits are measured on the raw
+  value (a CRLF is two characters), and the prompt shows the raw value as a
+  JSON string, so a newline appears as `\n`. One helper, `quoteInFull` in
+  `src/utils/prompt-text.ts`, which a test runs over every code point to check
+  that nothing in general category C or Z (other than the plain space) or with
+  `Default_Ignorable_Code_Point` is accepted.
+
+- **A malformed `Host` header or request target no longer stops the HTTP
+  server.** The listener parsed the request target against the client's `Host`
+  header before authentication, and a value `URL` could not parse threw out of
+  the request handler, which exits the process. The target is now parsed
+  against a fixed base inside a guard, so the `Host` header is not consulted;
+  an unparseable target is answered with a 400 JSON body and the server keeps
+  serving. Routes, the S2S check, the credential check and the responses to
+  valid requests are unchanged. (The MCP transport itself still answers 400 to
+  an unparseable `Host` on `/mcp`, after the S2S check.)
+
+- **The Syncro subdomain is validated before it becomes a host name.** It was
+  used as-is in `https://<subdomain>.syncromsp.com`, so a value containing `/`
+  or `#` (for example from the `X-Syncro-Subdomain` header or
+  `SYNCRO_SUBDOMAIN`) could send the API key to another host. `getClient()` in
+  `src/utils/client.ts` now accepts only one DNS label (letters, digits and
+  inner hyphens, at most 63 characters) and otherwise fails with a clear error
+  and no outbound request. Both the SDK-backed tools and the new REST helper
+  build their host from that client, so both are covered. A value such as
+  `acme.syncromsp.com` is now rejected; use `acme`.
+
 - **Cross-tenant elicitation/confirmation misroute (gateway mode).** The
   "server reference" used by elicitation helpers (`src/utils/elicitation.ts`
   — `elicitSelection` / `elicitText` / `elicitConfirmation`) was stored in a
@@ -56,16 +129,171 @@
   - The two renderable tools advertise the UI via `_meta` (`ui/resourceUri`, plus the nested `ui.resourceUri` form) pointing at a new `ui://syncro/ticket-card.html` resource served as `text/html;profile=mcp-app`. The card HTML is a self-contained vite single-file bundle embedded at build time (`src/generated/ticket-card-html.ts`, committed), so it serves identically from stdio, Node HTTP, and the fs-less Cloudflare Workers runtime. The server now declares the `resources` capability and answers `resources/list` / `resources/read` (`src/resources.ts`).
   - The card is neutral by default (system fonts, no vendor identity, no external fetches) and brandable via `window.__BRAND__` injection or `MCP_BRAND_*` env vars (`MCP_BRAND_NAME`, `MCP_BRAND_LOGO_URL`, `MCP_BRAND_PRIMARY_COLOR`, `MCP_BRAND_ACCENT_COLOR`, `MCP_BRAND_BG`, `MCP_BRAND_TEXT`): at serve time the server replaces the card's BRAND_INJECT marker with an inline, `<`-escaped `window.__BRAND__` script, so self-hosters can theme the card without rebuilding. No brand configured = HTML served unchanged.
 
+- **Syncro MSP job depth (WYREAI-464).** New tools cover time, ticket line
+  items and RMM and patch work that the official Syncro MCP leaves open. They call
+  Syncro's REST API directly through `src/utils/rest.ts` (30s timeout per
+  call; path IDs must be positive integers) because `@wyre-ai/node-syncro`
+  does not wrap these endpoints.
+  - **Time (new `time` domain):** `syncro_time_list_entries` (filter by
+    `billing_status`, for example `unbilled`), `syncro_time_log_entry` and
+    `syncro_time_set_billable`.
+  - **Tickets:** `syncro_tickets_add_line_item` adds a labor, part or fee line
+    item that carries onto the ticket's invoice.
+  - **Assets / RMM:** `syncro_assets_get_patches`,
+    `syncro_assets_list_installed_applications`,
+    `syncro_assets_list_policy_folders`, `syncro_assets_set_policy_folder`
+    and `syncro_assets_run_script`.
+  - **Write confirmation:** over stdio with an elicitation-capable client,
+    every new write asks the user through MCP elicitation first. A decline or
+    cancel always stops the call, and a prompt that fails stops it too. Over
+    HTTP, including behind the gateway, there is no prompt: the server is
+    created per request and never learns the client's capabilities. Ordinary
+    writes proceed with no confirmation, and the destructive
+    `syncro_assets_run_script` requires `confirm: true`. That flag is supplied
+    by the calling model, so it is a convention the model is asked to honour,
+    not an enforcement boundary. On the gateway the boundary is the gateway's
+    per-tool tier policy; restrict `syncro_assets_run_script` to the admin
+    tier.
+  - **Prompt contents:** a prompt shows what the call will send. Free text
+    that is sent (time entry notes, a line item name and description, and
+    the destructive tools' values) is shown as the raw JSON string or the
+    call is refused; see the Security entries above. A line item name or
+    description that was not given is shown as "not set" instead of
+    `"undefined"`. A line item prompt shows
+    every field it sends: quantity, name, description, unit price, unit cost,
+    catalog product and taxable. All through `src/utils/prompt-text.ts`.
+  - **Write failures:** only a 4xx response (including a 429) means Syncro
+    rejected a write, and it is reported as a plain rejection. A write that
+    ends any other way (network error, timeout, or a 5xx or other non-4xx
+    status; for a REST-helper write also a 2xx whose body is not a JSON object)
+    reports that it may or may not have been applied and that Syncro should be
+    checked before retrying. This covers the REST-helper writes and the
+    SDK-backed writes (`syncro_tickets_create`,
+    `syncro_tickets_update`, `syncro_tickets_add_comment`,
+    `syncro_customers_create`, `syncro_contacts_create`,
+    `syncro_invoices_create` and `syncro_invoices_email`), through
+    `syncroRest` and one wrapper, `sdkWrite` in `src/utils/write-outcome.ts`.
+    Every write is sent once; see "Writes are sent once" under Fixed. The REST
+    helper sets a 30s timeout; the SDK sets none and this server does not add
+    one. An error body that ends in a full stop no longer produces `..` before
+    that sentence. An SDK-backed write that gets a 2xx with an array or a bare
+    value is returned as a success without the note: `sdkWrite` does not check
+    the shape of an SDK response.
+  - **Stricter argument validation:** these checks run before a prompt is
+    built or a request is sent, and a failure is returned as an error with no
+    outbound call. `asset_id`, `script_id`, `policy_folder_id`, `ticket_id`,
+    `timer_id` and `invoice_id` (and `user_id` and `product_id` on
+    `syncro_time_log_entry` and `syncro_tickets_add_line_item`) must be
+    positive integers; `script_id` and `invoice_id` were previously passed
+    through unchecked. `duration_minutes` must be a positive whole number
+    (Syncro's schema says integer) and `quantity` a number above 0;
+    `price_retail` and `price_cost` must be finite numbers. `billable` and
+    `taxable` must be real booleans. `run_at`, `start_at` and `end_at` must be
+    real ISO 8601 date-times with `Z` or an offset (`2026-11-07T02:00:00Z`);
+    a date-only value, a value with no offset and an impossible date such as
+    the 31st of February are rejected. `syncro_assets_run_script` refuses the
+    call if `run_as` or a variable name or value is over 200 characters, or the
+    variables together are over 1000 characters when listed, and
+    `syncro_invoices_email` refuses it if cc or subject is over 200 characters
+    or the message is over 1000, and `syncro_time_log_entry` and
+    `syncro_tickets_add_line_item` refuse `notes` or `description` over 1000
+    characters and `name` over 200; see the Security entries above for what else is
+    refused.
+  - See `docs/WYREAI-464-capability-diff.md` for the capability diff and the
+    jobs deferred for lack of a Syncro API (backup status, KB-level patch
+    approval, recurring script schedules).
+
 ### Changed
 
 - **Client cache moved off module-level state (defense-in-depth, not a live vulnerability).** `src/utils/client.ts` held the cached Syncro client/credentials in module-level `let _client` / `let _credentials` singletons, with manual "did credentials change → invalidate → recreate" logic in `getClient()`. A security review traced that sequence end-to-end and confirmed it is **not** exploitable as coded — the validate/invalidate/recreate/return path runs synchronously with no `await` between checking credentials and using the resulting client, so there is no interleaving that hands one tenant another tenant's client. It was still structurally fragile (a future edit that introduced an `await` in the wrong spot could reintroduce that bug class) and inconsistent with the rest of this file's per-tenant state, which already lives in `AsyncLocalStorage` (`credentialStore` in `src/utils/credential-store.ts`, and the `server-ref.ts` fix above for the identical bug class in a different subsystem).
   - **Fix:** the client cache now lives in an `AsyncLocalStorage`-scoped box instead of module variables (`runWithClientScope` for per-request transports — Node HTTP, Workers — and `bindClientScope` for the single-session stdio transport), mirroring `server-ref.ts`. Credential resolution, error messages, and the mismatch-detect-and-recreate behavior are unchanged — only where the mutable state lives has changed. Call sites updated: `src/index.ts` (Node HTTP `handleMcp` wraps the connect/handleRequest chain in `runWithClientScope`; stdio calls `bindClientScope` once at startup), `src/worker.ts` (Cloudflare Workers `handleMcp` wraps the connect/handleRequest chain in `runWithClientScope`). `getClient()` / `getCredentials()` / `clearClient()` keep their existing signatures and behavior, so no domain handler call sites changed.
   - **Regression test:** `tests/utils/client.test.ts` runs two concurrent "tenants" (distinct credential sets) through `runWithClientScope`, each with an `await` gap between validating credentials and re-using the client, and asserts each tenant's client is cached correctly within its own scope, is built from its own credentials, and is never the same instance as the other tenant's.
 
-- **Published to GitHub Packages.** Enabled npm publishing for the already-scoped `@wyre-technology/syncro-mcp` package: `@semantic-release/npm` `npmPublish` is now `true` and `publishConfig.registry` points at `npm.pkg.github.com`. The release workflow already configured an authenticated `.npmrc` and `packages: write`. Updated the README, which previously stated there was no npm package. The GHCR image name and `io.github.wyre-technology/syncro-mcp` MCP Registry identifier are unchanged.
+- **GitHub Packages publishing was set up, then turned off.** `publishConfig.registry` points at `npm.pkg.github.com`, but `.releaserc.json` sets `npmPublish: false` (commit 7416b03), so releases do not publish an npm package; the GHCR image and the `io.github.wyre-technology/syncro-mcp` MCP Registry identifier are what ships.
+
+- **Every tool now carries MCP classification annotations.** All sidecar tools,
+  including the existing customer, contact, ticket, asset and invoice tools,
+  declare `readOnlyHint` / `destructiveHint` / `idempotentHint` presets
+  (`src/utils/annotations.ts`) so clients can classify each as read, write or
+  destructive. The annotations are hints, not enforcement.
+  `tests/classification.test.ts` fails if a tool is unclassified or changes
+  class. `syncro_invoices_email` is classified
+  destructive, and its description now warns that sending cannot be undone.
+
+- **`syncro_tickets_add_comment` now says that a public comment is emailed to
+  the customer.** The tool and argument descriptions explain `hidden` (internal
+  note) and `do_not_email`. Behaviour and defaults are unchanged.
+
+- **`syncro_tickets_create` now says that `comment_body` may be visible to the
+  customer.** The tool and argument descriptions warn that the initial comment
+  may be emailed to the customer and cannot be marked hidden here, and point
+  to `syncro_tickets_add_comment` with `hidden: true` for an internal note.
+  Behaviour is unchanged.
+
+- **`syncro_assets_set_policy_folder` now says that a policy folder can apply
+  policies and scripts.** The description adds that moving a device into a
+  policy folder can apply that folder's policies and scripts to it. Its
+  classification and guard are unchanged.
+
+- **`syncro_invoices_email` now goes through the destructive write guard.**
+  It previously called Syncro directly even though it is annotated
+  destructive. It now asks the user through MCP elicitation when the client
+  supports it. When the client cannot elicit (always the case over HTTP), it
+  returns "Confirmation required" unless the call passes `confirm: true`; a
+  new optional `confirm` argument was added for that. Callers that used to
+  email an invoice without `confirm` over HTTP or stdio without elicitation
+  must now pass it. The prompt (and the "Confirmation required" message)
+  shows cc, subject and the message body. `invoice_id` must be a positive
+  integer. See "Write confirmation" above for what `confirm` does and does not
+  enforce.
 
 ### Fixed
 
+- **Writes are sent once.** The SDK resends a POST after a 5xx or 429, so one
+  call to `syncro_tickets_create`, `_add_comment`, `syncro_invoices_email` or
+  another SDK-backed write could create a record or send an email several
+  times, and a 429 on a resend after a 5xx was reported as a plain rejection
+  although the first attempt may have been applied. SDK-backed writes now run
+  on a second client (`getWriteClient` in `src/utils/client.ts`) with the
+  SDK's retries turned off, through `sdkWrite`. Reads keep the SDK's retries.
+  The SDK counts rate limit use per client, so reads and writes each count
+  against their own budget. The SDK has no request timeout, and none was added
+  to SDK-backed writes.
+- **A 2xx whose body is not a JSON object, on a REST-helper write, now
+  carries the unknown-outcome note.** HTML, `null`, an array or a bare value
+  reported a plain "Expected JSON" error, or for `null` a TypeError in the
+  tool, although the write may have been applied: `syncro_time_log_entry` (a
+  retry would log the time twice), `syncro_time_set_billable` and
+  `syncro_assets_set_policy_folder` threw after the write. `syncroRest` now
+  rejects such a body once, for every caller. A write that gets a status other
+  than a 2xx or 4xx gets the note as well; a read never does.
+- **A line item prompt no longer shows `"undefined"`.** `syncro_tickets_add_line_item`
+  quoted a missing `description` or `name` as the text `"undefined"` while the
+  request left the field out. The prompt now says "not set" for a description
+  and "an item with no name" for a name.
+- **Time and line item arguments are validated more strictly.** `billable`
+  (both time tools) must be a real boolean: the string `"false"` was shown in
+  the prompt as billable and sent as text. `duration_minutes` and `quantity`
+  must be positive. `isoTimestamp` rejects impossible dates and requires `Z`
+  or an offset, to match the tool descriptions. A line item prompt shows
+  `product_id`, `description`, `price_cost` and `taxable`, and `product_id`,
+  `price_cost` and `taxable` are validated.
+- **Documentation.** The README's rate limit section said the SDK handles rate
+  limiting for every tool, which is not true for the REST-helper tools, and
+  named the package `@wyre-technology/node-syncro` instead of
+  `@wyre-ai/node-syncro`; both are corrected. The README now says plainly that
+  `syncro_tickets_add_comment` and `syncro_tickets_create` with `comment_body`
+  can email the customer and are not confirm-gated, and that
+  `syncro_assets_set_policy_folder` changes which policies apply to a managed
+  device. The `syncro_navigate` descriptions of the invoices and tickets
+  domains now list create, email, comment and line item operations, and no
+  longer claim update tools for customers and contacts that do not exist.
+- **`syncro_status` no longer echoes a subdomain the client rejects.** It
+  printed the raw configured subdomain and said "Configured" for a value that
+  every other tool refuses. It now prints the subdomain only when it passes the
+  same check as `getClient()` (`isValidSubdomain` in `src/utils/client.ts`);
+  otherwise it reports the subdomain as invalid without repeating it, and a
+  missing subdomain is reported as missing instead of "Configured".
 - **`syncro_status` and the unknown-tool error advised calling
   `syncro_navigate` to discover tools without qualification.** Conduit
   suppresses `*_navigate` / `*_back` at the gateway (tier filtering lives in

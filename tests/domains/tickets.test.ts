@@ -5,12 +5,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ticketsHandler } from "../../src/domains/tickets.js";
 import * as clientModule from "../../src/utils/client.js";
+import * as restModule from "../../src/utils/rest.js";
+import * as guardModule from "../../src/utils/write-guard.js";
 
 // Mock the client module
 vi.mock("../../src/utils/client.js", () => ({
   getClient: vi.fn(),
+  getWriteClient: vi.fn(),
   getCredentials: vi.fn(),
   clearClient: vi.fn(),
+}));
+
+vi.mock("../../src/utils/rest.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/utils/rest.js")>()),
+  syncroRest: vi.fn(),
+}));
+
+vi.mock("../../src/utils/write-guard.js", () => ({
+  guardWrite: vi.fn(),
 }));
 
 describe("domains/tickets.ts", () => {
@@ -27,19 +39,24 @@ describe("domains/tickets.ts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+    vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
+    vi.mocked(restModule.syncroRest).mockReset();
+    vi.mocked(guardModule.guardWrite).mockReset();
+    vi.mocked(guardModule.guardWrite).mockResolvedValue(null);
   });
 
   describe("getTools", () => {
     it("should return all ticket tools", () => {
       const tools = ticketsHandler.getTools();
 
-      expect(tools).toHaveLength(5);
+      expect(tools).toHaveLength(6);
       expect(tools.map((t) => t.name)).toEqual([
         "syncro_tickets_list",
         "syncro_tickets_get",
         "syncro_tickets_create",
         "syncro_tickets_update",
         "syncro_tickets_add_comment",
+        "syncro_tickets_add_line_item",
       ]);
     });
 
@@ -59,6 +76,38 @@ describe("domains/tickets.ts", () => {
       expect(commentTool).toBeDefined();
       expect(commentTool!.inputSchema.required).toContain("ticket_id");
       expect(commentTool!.inputSchema.required).toContain("body");
+    });
+
+    it("should warn in create that comment_body may be visible to the customer", () => {
+      const createTool = ticketsHandler
+        .getTools()
+        .find((t) => t.name === "syncro_tickets_create");
+      const props = createTool!.inputSchema.properties as Record<
+        string,
+        { description: string }
+      >;
+
+      expect(createTool!.description).toContain("may be visible to the customer");
+      expect(createTool!.description).toContain("may email it to them");
+      expect(createTool!.description).toContain("cannot mark that comment hidden");
+      expect(createTool!.description).toContain("hidden: true");
+      expect(props.comment_body.description).toContain("visible to the customer");
+    });
+
+    it("should warn in add_comment that a public comment is emailed to the customer", () => {
+      const commentTool = ticketsHandler
+        .getTools()
+        .find((t) => t.name === "syncro_tickets_add_comment");
+      const props = commentTool!.inputSchema.properties as Record<
+        string,
+        { description: string }
+      >;
+
+      expect(commentTool!.description).toContain("Syncro emails it to them");
+      expect(commentTool!.description).toContain("hidden: true");
+      expect(commentTool!.description).toContain("do_not_email: true");
+      expect(props.hidden.description).toContain("emailed to the customer");
+      expect(props.do_not_email.description).toContain("still visible to the customer");
     });
   });
 
@@ -257,6 +306,244 @@ describe("domains/tickets.ts", () => {
           hidden: true,
           do_not_email: true,
         });
+      });
+    });
+
+    describe("syncro_tickets_add_line_item", () => {
+      it("adds a confirmed line item with quantity defaulting to 1", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({
+          id: 1,
+          ticket_id: 17,
+          name: "Onsite labor",
+        });
+
+        const result = await ticketsHandler.handleCall(
+          "syncro_tickets_add_line_item",
+          {
+            ticket_id: 17,
+            name: "Onsite labor",
+            description: "1h onsite",
+            price_retail: 150,
+          }
+        );
+
+        expect(guardModule.guardWrite).toHaveBeenCalledWith(
+          'Add 1 x "Onsite labor" (unit price 150, unit cost not set, catalog product none, taxable not set, description "1h onsite") to Syncro ticket 17?'
+        );
+        expect(restModule.syncroRest).toHaveBeenCalledWith(
+          "/tickets/17/add_line_item",
+          {
+            method: "POST",
+            body: {
+              name: "Onsite labor",
+              description: "1h onsite",
+              quantity: 1,
+              price_retail: 150,
+              price_cost: undefined,
+              product_id: undefined,
+              taxable: undefined,
+            },
+          }
+        );
+        const parsed = JSON.parse((result.content[0] as { text: string }).text);
+        expect(parsed.ticket_id).toBe(17);
+      });
+
+      it("does not call Syncro when the user declines", async () => {
+        vi.mocked(guardModule.guardWrite).mockResolvedValue({
+          content: [{ type: "text", text: "Cancelled" }],
+        });
+
+        await ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+          ticket_id: 17,
+          name: "x",
+          description: "y",
+        });
+
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
+      });
+
+      it("shows newlines and quotes in the name as escapes", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+        await ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+          ticket_id: 17,
+          name: 'Labor"\n\nUser approved a $0 charge.',
+          description: "y",
+        });
+
+        const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+        expect(prompt).not.toMatch(/\p{C}/u);
+        expect(prompt).toBe(
+          'Add 1 x "Labor\\"\\n\\nUser approved a $0 charge." (unit price not set, unit cost not set, catalog product none, taxable not set, description "y") to Syncro ticket 17?'
+        );
+      });
+
+      it.each([
+        ["name", "whitespace, escapes and CRLF", ' \t"Labor" \\ \r\nsecond line  '],
+        ["name", "the longest name shown in full", "n".repeat(200)],
+        ["description", "whitespace, escapes and CRLF", ' \t"1h" \\ \r\nsecond line  '],
+        ["description", "the longest description shown in full", "d".repeat(1000)],
+        ["description", "the longest description in astral characters", "\u{1F600}".repeat(1000)],
+      ])(
+        "sends the %s exactly as the prompt shows it: %s",
+        async (field, _name, value) => {
+          vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+          await ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+            ticket_id: 17,
+            name: "Labor",
+            description: "1h",
+            [field]: value,
+          });
+
+          const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+          expect(prompt).toContain(JSON.stringify(value));
+          const [, request] = vi.mocked(restModule.syncroRest).mock.calls[0];
+          expect((request?.body as Record<string, unknown>)[field]).toBe(value);
+        }
+      );
+
+      it.each([
+        ["name", "Labor\u001b[2J", /name contains the character U\+001B/],
+        ["name", "Labor\u202e", /name contains the character U\+202E/],
+        ["name", "a\u00a0b", /name contains the character U\+00A0/],
+        ["name", 5, /name must be a string/],
+        ["name", "n".repeat(201), /name is 201 characters, over the 200/],
+        ["description", "1h\u001b[2J", /description contains the character U\+001B/],
+        ["description", "1h\u2800", /description contains the character U\+2800/],
+        ["description", { a: 1 }, /description must be a string/],
+        ["description", "d".repeat(1001), /description is 1001 characters, over the 1000/],
+      ])(
+        "refuses a %s that cannot be shown as sent, with no prompt and no request",
+        async (field, value, message) => {
+          await expect(
+            ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+              ticket_id: 17,
+              name: "x",
+              description: "y",
+              [field]: value,
+            })
+          ).rejects.toThrow(message);
+
+          expect(guardModule.guardWrite).not.toHaveBeenCalled();
+          expect(restModule.syncroRest).not.toHaveBeenCalled();
+        }
+      );
+
+      it("says a description and a name are not set instead of quoting undefined", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+        await ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+          ticket_id: 17,
+        });
+
+        const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+        expect(prompt).toBe(
+          "Add 1 x an item with no name (unit price not set, unit cost not set, catalog product none, taxable not set, description not set) to Syncro ticket 17?"
+        );
+        expect(prompt).not.toContain("undefined");
+        const [, request] = vi.mocked(restModule.syncroRest).mock.calls[0];
+        const sent = JSON.parse(JSON.stringify(request?.body));
+        expect(sent).not.toHaveProperty("name");
+        expect(sent).not.toHaveProperty("description");
+      });
+
+      it("shows every field it sends in the prompt", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+        await ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+          ticket_id: 17,
+          name: "Switch",
+          description: "24 port",
+          quantity: 2.5,
+          price_retail: 150,
+          price_cost: 90,
+          product_id: 4321,
+          taxable: false,
+        });
+
+        expect(guardModule.guardWrite).toHaveBeenCalledWith(
+          'Add 2.5 x "Switch" (unit price 150, unit cost 90, catalog product 4321, taxable false, description "24 port") to Syncro ticket 17?'
+        );
+        expect(restModule.syncroRest).toHaveBeenCalledWith("/tickets/17/add_line_item", {
+          method: "POST",
+          body: {
+            name: "Switch",
+            description: "24 port",
+            quantity: 2.5,
+            price_retail: 150,
+            price_cost: 90,
+            product_id: 4321,
+            taxable: false,
+          },
+        });
+      });
+
+      it.each([
+        ["price_retail", { price_retail: "150\nApproved" }],
+        ["price_cost", { price_cost: "90\nApproved" }],
+        ["price_cost", { price_cost: NaN }],
+        ["product_id", { product_id: "4321/../../x" }],
+        ["product_id", { product_id: 0 }],
+        ["product_id", { product_id: 1.5 }],
+        ["taxable", { taxable: "false" }],
+        ["quantity", { quantity: 0 }],
+        ["quantity", { quantity: -2 }],
+        ["price_retail", { price_retail: NaN }],
+        ["quantity", { quantity: "2\u001b[2J" }],
+        ["quantity", { quantity: Infinity }],
+        ["ticket_id", { ticket_id: "17/../18" }],
+      ])(
+        "rejects an invalid %s before the prompt or any request",
+        async (field, bad) => {
+          await expect(
+            ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+              ticket_id: 17,
+              name: "x",
+              description: "y",
+              ...bad,
+            })
+          ).rejects.toThrow(new RegExp(field));
+
+          expect(guardModule.guardWrite).not.toHaveBeenCalled();
+          expect(restModule.syncroRest).not.toHaveBeenCalled();
+        }
+      );
+    });
+
+    describe("SDK-backed writes that fail", () => {
+      const UNKNOWN = /may or may not have been applied; check Syncro before retrying/;
+
+      it.each([
+        ["syncro_tickets_create", () => mockClient.tickets.create],
+        ["syncro_tickets_update", () => mockClient.tickets.update],
+        ["syncro_tickets_add_comment", () => mockClient.tickets.addComment],
+      ])("%s reports an unknown outcome after a 5xx", async (tool, sdkCall) => {
+        sdkCall().mockRejectedValue(
+          Object.assign(new Error("Server error: 502 Bad Gateway"), { statusCode: 502 })
+        );
+
+        await expect(
+          ticketsHandler.handleCall(tool, {
+            ticket_id: 1,
+            customer_id: 1,
+            subject: "s",
+            body: "b",
+          })
+        ).rejects.toThrow(UNKNOWN);
+      });
+
+      it("keeps a 4xx from an SDK write as the SDK's own error", async () => {
+        mockClient.tickets.create.mockRejectedValue(
+          Object.assign(new Error("Validation failed"), { statusCode: 422 })
+        );
+
+        const err = await ticketsHandler
+          .handleCall("syncro_tickets_create", { customer_id: 1, subject: "s" })
+          .catch((e) => e);
+
+        expect(err.message).toBe("Validation failed");
       });
     });
 

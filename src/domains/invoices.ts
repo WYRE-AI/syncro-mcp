@@ -7,6 +7,15 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import { pathId } from "../utils/rest.js";
+import { guardWrite } from "../utils/write-guard.js";
+import { sdkWrite } from "../utils/write-outcome.js";
+import { MAX_LONG_TEXT_PROMPT, quoteInFull } from "../utils/prompt-text.js";
+import {
+  ADDITIVE_WRITE,
+  DESTRUCTIVE,
+  READ_ONLY,
+} from "../utils/annotations.js";
 
 /**
  * Get invoice domain tools
@@ -17,6 +26,7 @@ function getTools(): Tool[] {
       name: "syncro_invoices_list",
       description:
         "List invoices in Syncro. Can filter by customer, status, or date range.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -52,6 +62,7 @@ function getTools(): Tool[] {
       name: "syncro_invoices_get",
       description:
         "Get details for a specific invoice by its ID, including line items",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -66,6 +77,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_invoices_create",
       description: "Create a new invoice in Syncro",
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -91,7 +103,9 @@ function getTools(): Tool[] {
     },
     {
       name: "syncro_invoices_email",
-      description: "Email an invoice to the customer",
+      description:
+        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. The confirmation prompt shows cc_emails, subject and message exactly as sent, so the call is refused if one is not a string, contains a control or invisible character (newline, carriage return and tab are allowed), a space other than the plain space (such as a non-breaking space), or is over its limit (200 characters for cc_emails and subject, 1000 for message). Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve.",
+      annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -110,6 +124,11 @@ function getTools(): Tool[] {
           message: {
             type: "string",
             description: "Custom email message body",
+          },
+          confirm: {
+            type: "boolean",
+            description:
+              "Set true only after the user approved sending this email. Required when the client cannot show a confirmation prompt (always the case over HTTP). This server cannot verify that the user approved",
           },
         },
         required: ["invoice_id"],
@@ -165,7 +184,7 @@ async function handleCall(
     }
 
     case "syncro_invoices_get": {
-      const invoiceId = args.invoice_id as number;
+      const invoiceId = pathId(args.invoice_id, "invoice_id");
       const invoice = await client.invoices.get(invoiceId);
 
       return {
@@ -174,12 +193,14 @@ async function handleCall(
     }
 
     case "syncro_invoices_create": {
-      const invoice = await client.invoices.create({
-        customer_id: args.customer_id as number,
-        date: args.date as string | undefined,
-        due_date: args.due_date as string | undefined,
-        notes: args.notes as string | undefined,
-      });
+      const invoice = await sdkWrite((sdk) =>
+        sdk.invoices.create({
+          customer_id: args.customer_id as number,
+          date: args.date as string | undefined,
+          due_date: args.due_date as string | undefined,
+          notes: args.notes as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(invoice, null, 2) }],
@@ -187,12 +208,35 @@ async function handleCall(
     }
 
     case "syncro_invoices_email": {
-      const invoiceId = args.invoice_id as number;
-      await client.invoices.email(invoiceId, {
-        cc_emails: args.cc_emails as string | undefined,
-        subject: args.subject as string | undefined,
-        message: args.message as string | undefined,
-      });
+      const invoiceId = pathId(args.invoice_id, "invoice_id");
+      // The user approves exactly what the prompt shows, and an email cannot
+      // be recalled, so cc, subject and message are shown in full or the
+      // call is refused.
+      const cc =
+        args.cc_emails === undefined
+          ? ""
+          : `, cc ${quoteInFull(args.cc_emails, "cc_emails")}`;
+      const subject =
+        args.subject === undefined
+          ? ""
+          : `, subject ${quoteInFull(args.subject, "subject")}`;
+      const message =
+        args.message === undefined
+          ? ""
+          : `, message ${quoteInFull(args.message, "message", MAX_LONG_TEXT_PROMPT)}`;
+      const blocked = await guardWrite(
+        `Email Syncro invoice ${invoiceId} to the customer${cc}${subject}${message}? Sending cannot be undone.`,
+        { destructive: true, args }
+      );
+      if (blocked) return blocked;
+
+      await sdkWrite((sdk) =>
+        sdk.invoices.email(invoiceId, {
+          cc_emails: args.cc_emails as string | undefined,
+          subject: args.subject as string | undefined,
+          message: args.message as string | undefined,
+        })
+      );
 
       return {
         content: [

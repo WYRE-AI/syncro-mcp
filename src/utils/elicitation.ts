@@ -83,6 +83,47 @@ export async function elicitText(
   }
 }
 
+export type WriteConfirmation = "confirmed" | "declined" | "unavailable";
+
+/**
+ * Ask the user to confirm a write before it reaches Syncro.
+ *
+ * Unlike {@link elicitConfirmation}, this separates an explicit decline or
+ * cancel ("declined") from a client that cannot elicit ("unavailable"), so a
+ * caller never proceeds with a write the user turned down.
+ */
+export async function confirmWrite(
+  message: string
+): Promise<WriteConfirmation> {
+  const server = getServerRef();
+  if (!server) return "unavailable";
+
+  // Fall back only when the client cannot show a form. Once a prompt is
+  // supported, a failed request (timeout, transport error) must not let the
+  // write through unconfirmed, so the error propagates.
+  if (!server.getClientCapabilities()?.elicitation?.form) return "unavailable";
+
+  const result = await server.elicitInput({
+    message,
+    requestedSchema: {
+      type: "object" as const,
+      properties: {
+        confirm: {
+          type: "boolean" as const,
+          title: "Confirm",
+          description: "Confirm this action",
+        },
+      },
+      required: ["confirm"],
+    },
+  });
+
+  if (result.action === "accept" && result.content?.confirm === true) {
+    return "confirmed";
+  }
+  return "declined";
+}
+
 /**
  * Ask the user to confirm an action.
  */

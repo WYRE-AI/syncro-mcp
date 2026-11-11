@@ -1,0 +1,86 @@
+/**
+ * Render caller-supplied text for a confirmation prompt.
+ *
+ * Every free-text value in a prompt goes through here, so a caller cannot
+ * forge prompt text. The rule: a value that is sent to Syncro is shown with
+ * {@link quoteInFull}, so what the user approves is exactly what is sent. It
+ * never cleans or cuts the value: it shows the raw text as a JSON string, or
+ * refuses it. {@link quote} is only for a value that is not sent as it is,
+ * such as a name inside an error message: it reduces the value to one line,
+ * strips control and format characters (ESC, NUL, right-to-left override and
+ * the like) and cuts it when long.
+ */
+
+/** Longest value {@link quote} and {@link quoteInFull} show by default. */
+const MAX_PROMPT_VALUE = 200;
+
+/** Longest long-form text (a message, notes or a description) a prompt shows in full. */
+export const MAX_LONG_TEXT_PROMPT = 1000;
+
+/** One line of text: any run of whitespace, control or format characters becomes one space. */
+function oneLine(value: unknown): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return String(text).replace(/[\s\p{C}]+/gu, " ").trim();
+}
+
+/**
+ * Show a value that is not sent as it is (for example a name inside an error
+ * message), cut to `max` characters with the full length stated when it is
+ * longer. A value that is sent to Syncro must use {@link quoteInFull}.
+ */
+export function quote(value: unknown, max = MAX_PROMPT_VALUE): string {
+  const characters = [...oneLine(value)];
+  if (characters.length <= max) return JSON.stringify(characters.join(""));
+  const shown = JSON.stringify(characters.slice(0, max).join(""));
+  return `${shown} (first ${max} of ${characters.length} characters)`;
+}
+
+/**
+ * Characters that cannot be shown faithfully in a prompt:
+ *  - control, format, private-use, unassigned and surrogate code points
+ *    (general category C), except newline, carriage return and tab, which
+ *    `JSON.stringify` shows as the visible escapes `\n`, `\r` and `\t`;
+ *  - every separator (category Z) except the plain space, which covers the
+ *    non-breaking and other wide or narrow spaces and the line and paragraph
+ *    separators;
+ *  - default-ignorable code points, which renderers draw as nothing: the
+ *    variation selectors, Hangul and Khmer fillers, the combining grapheme
+ *    joiner and the like, some of which are letters or marks in the tables;
+ *  - the Braille blank, which draws nothing but is not default-ignorable.
+ */
+const NOT_SHOWABLE =
+  /[^\P{C}\n\r\t]|[^\P{Z} ]|\p{Default_Ignorable_Code_Point}|\u2800/u;
+
+/**
+ * Show a value for a prompt exactly as it will be sent, or refuse it.
+ *
+ * The user approves what the prompt shows, so nothing may differ between the
+ * two: the value is shown as a JSON string of the raw text (a newline appears
+ * as `\n`, a quote is escaped), its length is measured on the raw text, and a
+ * value that is not a string, is longer than `max` characters, or contains a
+ * character that would not show up in the prompt throws instead of being
+ * cleaned or cut. `label` names the value in the error.
+ */
+export function quoteInFull(
+  value: unknown,
+  label: string,
+  max = MAX_PROMPT_VALUE
+): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string`);
+  }
+  const hidden = NOT_SHOWABLE.exec(value);
+  if (hidden) {
+    const codePoint = hidden[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0");
+    throw new Error(
+      `${label} contains the character U+${codePoint}, which cannot be shown in the confirmation prompt. Remove it; only newline, carriage return and tab are allowed as control characters.`
+    );
+  }
+  const length = [...value].length;
+  if (length > max) {
+    throw new Error(
+      `${label} is ${length} characters, over the ${max} that can be shown in full in the confirmation prompt. Shorten it.`
+    );
+  }
+  return JSON.stringify(value);
+}

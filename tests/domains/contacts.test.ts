@@ -9,6 +9,7 @@ import * as clientModule from "../../src/utils/client.js";
 // Mock the client module
 vi.mock("../../src/utils/client.js", () => ({
   getClient: vi.fn(),
+  getWriteClient: vi.fn(),
   getCredentials: vi.fn(),
   clearClient: vi.fn(),
 }));
@@ -25,6 +26,7 @@ describe("domains/contacts.ts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+    vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
   });
 
   describe("getTools", () => {
@@ -199,6 +201,21 @@ describe("domains/contacts.ts", () => {
         const parsed = JSON.parse((result.content[0] as { text: string }).text);
         expect(parsed.id).toBe(789);
         expect(parsed.name).toBe("New Contact");
+      });
+
+      it("should report an unknown outcome after a 5xx", async () => {
+        mockClient.contacts.create.mockRejectedValue(
+          Object.assign(new Error("Server error: 504 Gateway Timeout"), {
+            statusCode: 504,
+          })
+        );
+
+        await expect(
+          contactsHandler.handleCall("syncro_contacts_create", {
+            customer_id: 1,
+            name: "x",
+          })
+        ).rejects.toThrow(/may or may not have been applied/);
       });
 
       it("should create a contact with all fields", async () => {

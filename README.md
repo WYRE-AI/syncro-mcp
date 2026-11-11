@@ -10,7 +10,7 @@ A Model Context Protocol (MCP) server for Syncro MSP, implementing a decision tr
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/WYRE-AI/syncro-mcp)
 
 > **Operator note — GitHub Packages authentication (required for one-click deploys).**
-> This server depends on the private `@wyre-technology/node-syncro` SDK, which is
+> This server depends on the private `@wyre-ai/node-syncro` SDK, which is
 > hosted on **GitHub Packages**. GitHub Packages requires an authentication token
 > on every install (no anonymous reads, even for public packages), so the cloud
 > builders fail during `npm install` with `401 Unauthorized` unless you supply a
@@ -107,7 +107,7 @@ Copy [`.env.example`](.env.example) and set the variables below.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `SYNCRO_API_KEY` | For stdio and `AUTH_MODE=env` | Your Syncro API key |
-| `SYNCRO_SUBDOMAIN` | No | Your Syncro subdomain (if applicable) |
+| `SYNCRO_SUBDOMAIN` | No | Your Syncro subdomain, for example `acme` for `acme.syncromsp.com`. Letters, digits and hyphens only; a host name or URL is rejected before any request is sent. |
 | `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
 | `AUTH_MODE` | No | `gateway` (Docker image and Compose default) or `env`. Gateway mode requires `X-Syncro-API-Key` on each `/mcp` request and never falls back to `SYNCRO_*`. `env` uses those variables only after S2S auth succeeds. |
 | `CONDUIT_S2S_SECRET` | Yes for HTTP | Service-to-service secret. The HTTP server logs an error and exits non-zero when this is empty or a known placeholder (`changeme`, `your-s2s-secret`, `replace-with-a-real-secret`, `secret`, an unresolved `${...}` value, and the other example strings). Compose will not start without it. Never commit a real value. Generate one with `openssl rand -hex 32`. |
@@ -166,10 +166,44 @@ This reduces cognitive load and improves LLM tool selection accuracy.
 | Domain | Description | Tools |
 |--------|-------------|-------|
 | `customers` | Manage customer accounts | list, get, create, search |
-| `tickets` | Manage support tickets | list, get, create, update, add_comment |
-| `assets` | Manage configuration items | list, get, search |
+| `tickets` | Manage support tickets | list, get, create, update, add_comment, add_line_item |
+| `assets` | Manage assets and RMM actions | list, get, search, get_patches, list_installed_applications, list_policy_folders, set_policy_folder, run_script |
 | `contacts` | Manage customer contacts | list, get, create |
 | `invoices` | View and manage billing | list, get, create, email |
+| `time` | Ticket time entries | list_entries, log_entry, set_billable |
+
+Four writes deserve particular care:
+
+| Tool | What it does that you may not expect | Confirmation |
+|------|--------------------------------------|--------------|
+| `syncro_tickets_add_comment` | Unless `hidden: true`, the comment is public and Syncro emails it to the customer. `do_not_email: true` stops the email but a public comment stays visible. | Not confirm-gated: no prompt and no `confirm` flag on any transport. |
+| `syncro_tickets_create` | With `comment_body`, creates a comment that may be visible to the customer and emailed to them; this tool cannot mark it hidden. | Not confirm-gated, as above. |
+| `syncro_assets_set_policy_folder` | Changes which RMM policies (patch schedule, monitoring, automation, scripts) apply to a managed device. | Prompts over stdio with an elicitation-capable client; otherwise runs with no confirmation. |
+| `syncro_invoices_email` | Emails the invoice to the customer and cannot be undone. | Destructive: requires `confirm: true` when there is no prompt. |
+
+Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) that classify it as read, write, or destructive. The annotations are hints for MCP clients, not enforcement. See [`docs/WYREAI-464-capability-diff.md`](docs/WYREAI-464-capability-diff.md) for how this server and the official Syncro MCP split coverage.
+
+### Write confirmation
+
+How a write is confirmed depends on the transport.
+
+- **stdio, client supports elicitation:** the new write tools (`syncro_time_log_entry`, `syncro_time_set_billable`, `syncro_tickets_add_line_item`, `syncro_assets_set_policy_folder`, `syncro_assets_run_script`) and `syncro_invoices_email` ask the user through MCP elicitation. A client that declares an empty `elicitation` capability counts as supporting it, because the MCP specification defines that as form support. A declined or cancelled prompt stops the call, and a prompt that fails stops it too.
+- **stdio, client cannot elicit:** the ordinary writes proceed without a prompt. The two destructive tools, `syncro_assets_run_script` and `syncro_invoices_email`, require `confirm: true`.
+- **HTTP, including behind the gateway:** there is no prompt. The HTTP transport builds a new server for every request, so the server never learns whether the client can elicit. Ordinary writes proceed with no confirmation. `syncro_assets_run_script` and `syncro_invoices_email` require `confirm: true`, but the calling model supplies that flag itself, so it is a convention the model is asked to honour after asking the user, not an enforcement boundary. This server has no other confirmation step.
+
+On the gateway, the enforcement boundary is the gateway's per-tool tier policy (read, write, admin). Restrict `syncro_assets_run_script`, which runs code on a managed device, to the gateway's admin tier.
+
+**What a prompt shows.** The same text is returned in the "Confirmation required" message when `confirm: true` is needed.
+
+- **Ids.** Every id that any tool puts in a request path, SDK-backed or not, is checked first: `ticket_id`, `customer_id`, `contact_id`, `asset_id`, `invoice_id`, `script_id`, `policy_folder_id` and `timer_id`, and the id of a time entry that Syncro returns, must be positive integers. Anything else is rejected with an error before a prompt is built or a request is sent. An id that is only a query filter or a JSON body field (for example `customer_id` on `syncro_tickets_list`) cannot change the endpoint and is passed through as given.
+- **Other values.** `user_id` and `product_id` must be positive integers, `duration_minutes` a positive whole number (Syncro's schema is an integer), `quantity` a number above 0, `price_retail` and `price_cost` finite numbers, `billable` and `taxable` true or false (a string such as `"false"` is rejected), and `run_at`, `start_at` and `end_at` real ISO 8601 date-times with `Z` or an offset, such as `2026-11-07T02:00:00Z`. A date without an offset is rejected because its time zone would be ambiguous.
+- **Every free-text value that is sent is shown exactly as sent, or the call is refused.** This covers `notes` on `syncro_time_log_entry`, `name` and `description` on `syncro_tickets_add_line_item`, `run_as` and every script variable name and value on `syncro_assets_run_script`, and `cc_emails`, `subject` and `message` on `syncro_invoices_email`. What you approve is what is sent: nothing is trimmed, cut or cleaned between the prompt and the request. The call is refused, with no prompt and no request, if the value is not a string; contains a control character other than newline, carriage return and tab (so CRLF line endings are accepted, and a lone `\r` too); a format character (zero-width, direction-changing), a private-use, unassigned or surrogate code point; any space or separator other than the plain space (no-break and other wide or narrow spaces, line and paragraph separators); or a character that draws nothing (variation selectors, for example U+FE0F; Hangul and Khmer fillers; U+034F; U+2800); or is too long. The limit is 200 characters (1000 for time entry `notes`, a line item `description`, an email `message`, and for the script variables together as listed), counted on the raw value, so a run of newlines counts and a CRLF is two characters. The prompt shows the raw value as a JSON string: a newline appears as `\n`, a carriage return as `\r`, a tab as `\t` and a quote as `\"`. A line item name or description that was not given is shown as "not set" (the request omits it).
+
+### Write failures
+
+Only a 4xx response (including a 429) means Syncro rejected a write, and it is reported as a plain rejection. A write that ends any other way may still have been applied: a network error, a timeout, or a 5xx or other non-4xx status. Its error says "The change may or may not have been applied; check Syncro before retrying." This holds for the writes made through the REST helper (`syncro_time_log_entry`, `syncro_time_set_billable`, `syncro_tickets_add_line_item`, `syncro_assets_set_policy_folder`, `syncro_assets_run_script`) and for the SDK-backed writes (`syncro_tickets_create`, `syncro_tickets_update`, `syncro_tickets_add_comment`, `syncro_customers_create`, `syncro_contacts_create`, `syncro_invoices_create`, `syncro_invoices_email`). One more case holds for the REST helper only: a 2xx whose body is not a JSON object (HTML, `null`, an array) is reported as an error with the same note. An SDK-backed write that gets a 2xx with an array or a bare value is returned to the caller as a success, without the note; this server does not check the shape of an SDK response. Reads never carry the note.
+
+Every write is sent exactly once. The REST helper never retries, and SDK-backed writes use a client with retries turned off, so a create, comment or email is not repeated after a 5xx or 429. Reads keep the SDK's retries. Only the REST helper sets a timeout (30 seconds per call); the SDK has no timeout and this server does not add one, so an SDK-backed write that never receives a response does not end on its own.
 
 ## Tools Reference
 
@@ -180,7 +214,7 @@ Navigate to a domain to access its tools.
 
 ```json
 {
-  "domain": "customers" | "tickets" | "assets" | "contacts" | "invoices"
+  "domain": "customers" | "tickets" | "assets" | "contacts" | "invoices" | "time"
 }
 ```
 
@@ -261,7 +295,7 @@ Get a specific ticket by ID.
 ```
 
 #### syncro_tickets_create
-Create a new ticket.
+Create a new ticket. `comment_body` creates an initial comment that may be visible to the customer, and Syncro may email it to them. This tool cannot mark that comment hidden; to leave an internal note, omit `comment_body` and call `syncro_tickets_add_comment` with `hidden: true`.
 
 ```json
 {
@@ -284,13 +318,26 @@ Update an existing ticket.
 ```
 
 #### syncro_tickets_add_comment
-Add a comment to a ticket.
+Add a comment to a ticket. Unless `hidden` is `true`, the comment is public: the customer can see it and Syncro emails it to them. Use `hidden: true` for an internal note, and `do_not_email: true` to stop the notification email. This tool does not set either flag for you.
 
 ```json
 {
   "ticket_id": 789,
   "body": "Comment text",
   "hidden": false
+}
+```
+
+#### syncro_tickets_add_line_item
+Add a billable line item to a ticket (write; see [Write confirmation](#write-confirmation)). The prompt shows `name` and `description` exactly as sent, so the call is refused if one is not a string, contains a character the prompt cannot show, or is over its limit (200 characters for `name`, 1000 for `description`).
+
+```json
+{
+  "ticket_id": 789,
+  "name": "Onsite labor",
+  "description": "1h onsite",
+  "quantity": 1,
+  "price_retail": 150
 }
 ```
 
@@ -322,6 +369,55 @@ Search assets by query or serial number.
 {
   "query": "workstation",
   "asset_serial": "SN12345"
+}
+```
+
+#### syncro_assets_get_patches
+Windows patch status for an RMM-managed asset (installed, missing, failed, rejected).
+
+```json
+{
+  "asset_id": 456
+}
+```
+
+#### syncro_assets_list_installed_applications
+Software installed on an RMM-managed asset, e.g. to confirm a backup agent is present.
+
+```json
+{
+  "asset_id": 456
+}
+```
+
+#### syncro_assets_list_policy_folders
+A customer's RMM policy folders.
+
+```json
+{
+  "customer_id": 123
+}
+```
+
+#### syncro_assets_set_policy_folder
+Move an asset into a policy folder, which changes its RMM and patch policy. Moving a device into a policy folder can apply that folder's policies and scripts to it (write; see [Write confirmation](#write-confirmation)).
+
+```json
+{
+  "asset_id": 456,
+  "policy_folder_id": 2
+}
+```
+
+#### syncro_assets_run_script
+Run an existing Syncro RMM script once on an asset, now or at `run_at` (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). `script_id` must be a positive integer and `run_at` an ISO 8601 date-time with `Z` or an offset. The prompt shows `run_as` and every variable exactly as sent, so the call is refused if `run_as` or a variable name or value is not a string, contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space), or is over 200 characters, or if the variables together are over 1000 when listed. Restrict it to the gateway's admin tier.
+
+```json
+{
+  "asset_id": 456,
+  "script_id": 77,
+  "run_at": "2026-11-07T02:00:00Z",
+  "confirm": true
 }
 ```
 
@@ -390,23 +486,63 @@ Create a new invoice.
 ```
 
 #### syncro_invoices_email
-Email an invoice to the customer.
+Email an invoice to the customer (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). The prompt shows `cc_emails`, `subject` and `message` exactly as sent, so the call is refused if one is not a string, contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space), or is over its limit (200 characters for `cc_emails` and `subject`, 1000 for `message`).
 
 ```json
 {
   "invoice_id": 456,
-  "subject": "Your Invoice"
+  "subject": "Your Invoice",
+  "confirm": true
+}
+```
+
+### Time Domain
+
+#### syncro_time_list_entries
+List ticket time entries. `billing_status: "unbilled"` finds billable work not yet charged.
+
+```json
+{
+  "customer_id": 123,
+  "billing_status": "unbilled",
+  "created_after": "2026-10-01"
+}
+```
+
+#### syncro_time_log_entry
+Log completed time on a ticket with a billable flag (write; see [Write confirmation](#write-confirmation)). The prompt shows `notes` exactly as sent, so the call is refused if it is not a string, contains a character the prompt cannot show, or is over 1000 characters.
+
+```json
+{
+  "ticket_id": 789,
+  "start_at": "2026-11-05T14:00:00Z",
+  "duration_minutes": 30,
+  "billable": true,
+  "notes": "Reset MFA"
+}
+```
+
+#### syncro_time_set_billable
+Mark an existing time entry billable or non-billable (write; see [Write confirmation](#write-confirmation)).
+
+```json
+{
+  "timer_id": 11,
+  "billable": false
 }
 ```
 
 ## Rate Limiting
 
-Syncro API has a rate limit of 180 requests per minute. The underlying `@wyre-technology/node-syncro` library handles rate limiting automatically.
+Syncro API has a rate limit of 180 requests per minute. How a tool copes depends on how it calls Syncro:
+
+- **SDK-backed tools** (customers, contacts, ticket list, get, create, update and comment, asset list, get and search, invoices): the `@wyre-ai/node-syncro` client slows itself down near the limit and retries a read after a 429 or 5xx, up to three times with backoff. Writes are never retried, see [Write failures](#write-failures). The server uses one client for reads and another for writes, and the SDK counts requests per client, so each counts against its own budget.
+- **REST-helper tools** (`syncro_time_*`, `syncro_tickets_add_line_item`, `syncro_assets_get_patches`, `syncro_assets_list_installed_applications`, `syncro_assets_list_policy_folders`, `syncro_assets_set_policy_folder`, `syncro_assets_run_script`): these call Syncro directly with `fetch`. They do not throttle or retry, so a 429 is returned to the caller as an error.
 
 ## Development
 
 ```bash
-# Install dependencies. The @wyre-technology/node-syncro SDK lives on GitHub
+# Install dependencies. The @wyre-ai/node-syncro SDK lives on GitHub
 # Packages, so authenticate first:
 export NODE_AUTH_TOKEN=$(gh auth token)
 npm install

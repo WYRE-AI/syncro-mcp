@@ -13,6 +13,7 @@ import * as clientModule from "../../src/utils/client.js";
 // Mock the client module
 vi.mock("../../src/utils/client.js", () => ({
   getClient: vi.fn(),
+  getWriteClient: vi.fn(),
   getCredentials: vi.fn(),
   clearClient: vi.fn(),
 }));
@@ -30,6 +31,7 @@ describe("Error Handling", () => {
         },
       };
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+      vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
 
       await expect(
         customersHandler.handleCall("syncro_customers_list", {})
@@ -43,6 +45,7 @@ describe("Error Handling", () => {
         },
       };
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+      vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
 
       await expect(
         ticketsHandler.handleCall("syncro_tickets_get", { ticket_id: 999999 })
@@ -56,6 +59,7 @@ describe("Error Handling", () => {
         },
       };
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+      vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
 
       await expect(
         assetsHandler.handleCall("syncro_assets_get", { asset_id: 999999 })
@@ -69,6 +73,7 @@ describe("Error Handling", () => {
         },
       };
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+      vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
 
       await expect(
         contactsHandler.handleCall("syncro_contacts_create", { customer_id: 1, name: "" })
@@ -82,9 +87,13 @@ describe("Error Handling", () => {
         },
       };
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+      vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
 
       await expect(
-        invoicesHandler.handleCall("syncro_invoices_email", { invoice_id: 123 })
+        invoicesHandler.handleCall("syncro_invoices_email", {
+          invoice_id: 123,
+          confirm: true,
+        })
       ).rejects.toThrow("Invalid email address");
     });
   });
@@ -109,6 +118,7 @@ describe("Error Handling", () => {
         },
       };
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+      vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
 
       await expect(
         ticketsHandler.handleCall("syncro_tickets_list", {})
@@ -122,6 +132,7 @@ describe("Error Handling", () => {
         },
       };
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+      vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
 
       await expect(
         assetsHandler.handleCall("syncro_assets_list", {})
@@ -140,6 +151,7 @@ describe("Error Handling", () => {
         },
       };
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+      vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
 
       await expect(
         customersHandler.handleCall("syncro_customers_list", {})

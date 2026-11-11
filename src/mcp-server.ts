@@ -18,8 +18,9 @@ import {
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getDomainHandler, getAvailableDomains } from "./domains/index.js";
 import { isDomainName, type DomainName } from "./utils/types.js";
-import { getCredentials } from "./utils/client.js";
+import { getCredentials, isValidSubdomain } from "./utils/client.js";
 import { registerResourceHandlers } from "./resources.js";
+import { READ_ONLY } from "./utils/annotations.js";
 import type { RequestCredentials } from "./utils/credential-store.js";
 
 export type { RequestCredentials as SyncroCredentials };
@@ -29,14 +30,16 @@ export type { RequestCredentials as SyncroCredentials };
  */
 const domainDescriptions: Record<DomainName, string> = {
   customers:
-    "Customer management - list, get, create, and update customer accounts and information",
+    "Customer management - list, get, search, and create customer accounts",
   tickets:
-    "Ticket management - list, get, create, and update support tickets and workflow",
+    "Ticket management - list, get, create, and update tickets, add comments (a public comment is emailed to the customer unless hidden), and add billable line items",
   assets:
-    "Asset management - list and get hardware/software assets and configuration items",
+    "Asset and RMM management - list and get assets, read patch status and installed software, set policy folders, and run RMM scripts",
   contacts:
-    "Contact management - list, get, create, and update customer contacts and relationships",
-  invoices: "Invoice management - list and get billing and invoice information",
+    "Contact management - list, get, and create customer contacts",
+  invoices:
+    "Invoice management - list, get, create, and email invoices (emailing cannot be undone)",
+  time: "Ticket time entries - log billable or non-billable time and list unbilled work",
 };
 
 /**
@@ -51,6 +54,7 @@ const navigateTool: Tool = {
   name: "syncro_navigate",
   description:
     "Discover available Syncro tools by domain. Returns tool names and descriptions for the selected domain. All tools are callable at any time — this is a help/discovery aid, not a prerequisite.",
+  annotations: READ_ONLY,
   inputSchema: {
     type: "object",
     properties: {
@@ -62,7 +66,8 @@ const navigateTool: Tool = {
 - tickets: ${domainDescriptions.tickets}
 - assets: ${domainDescriptions.assets}
 - contacts: ${domainDescriptions.contacts}
-- invoices: ${domainDescriptions.invoices}`,
+- invoices: ${domainDescriptions.invoices}
+- time: ${domainDescriptions.time}`,
       },
     },
     required: ["domain"],
@@ -75,11 +80,30 @@ const navigateTool: Tool = {
 const statusTool: Tool = {
   name: "syncro_status",
   description: "Show credentials status and available domains",
+  annotations: READ_ONLY,
   inputSchema: {
     type: "object",
     properties: {},
   },
 };
+
+/**
+ * Credentials line for the status tool. The subdomain is printed only when
+ * the client would accept it, so a bad value is never echoed back.
+ */
+function describeCredentials(): string {
+  const creds = getCredentials();
+  if (!creds) {
+    return "NOT CONFIGURED - Please set SYNCRO_API_KEY environment variable";
+  }
+  if (!creds.subdomain) {
+    return "API key set, but no subdomain is configured. Tools will fail until SYNCRO_SUBDOMAIN is set";
+  }
+  if (!isValidSubdomain(creds.subdomain)) {
+    return 'API key set, but the configured subdomain is invalid: it must be a single label such as "acme". Tools will fail until it is fixed';
+  }
+  return `Configured (subdomain: ${creds.subdomain})`;
+}
 
 /**
  * Map from domain name to its tool definitions (loaded lazily)
@@ -237,10 +261,7 @@ export function createMcpServer(): Server {
       }
 
       if (name === "syncro_status") {
-        const creds = getCredentials();
-        const credStatus = creds
-          ? `Configured${creds.subdomain ? ` (subdomain: ${creds.subdomain})` : ""}`
-          : "NOT CONFIGURED - Please set SYNCRO_API_KEY environment variable";
+        const credStatus = describeCredentials();
 
         return {
           content: [
@@ -273,6 +294,10 @@ export function createMcpServer(): Server {
       }
       if (name.startsWith("syncro_invoices_")) {
         const handler = await getDomainHandler("invoices");
+        return await handler.handleCall(name, toolArgs);
+      }
+      if (name.startsWith("syncro_time_")) {
+        const handler = await getDomainHandler("time");
         return await handler.handleCall(name, toolArgs);
       }
 

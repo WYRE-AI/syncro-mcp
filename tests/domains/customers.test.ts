@@ -9,6 +9,7 @@ import * as clientModule from "../../src/utils/client.js";
 // Mock the client module
 vi.mock("../../src/utils/client.js", () => ({
   getClient: vi.fn(),
+  getWriteClient: vi.fn(),
   getCredentials: vi.fn(),
   clearClient: vi.fn(),
 }));
@@ -25,6 +26,7 @@ describe("domains/customers.ts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+    vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
   });
 
   describe("getTools", () => {
@@ -194,6 +196,18 @@ describe("domains/customers.ts", () => {
           zip: undefined,
           notes: undefined,
         });
+      });
+
+      it("should report an unknown outcome after a 5xx", async () => {
+        mockClient.customers.create.mockRejectedValue(
+          Object.assign(new Error("Server error: 500 Internal Server Error"), {
+            statusCode: 500,
+          })
+        );
+
+        await expect(
+          customersHandler.handleCall("syncro_customers_create", { business_name: "x" })
+        ).rejects.toThrow(/may or may not have been applied/);
       });
     });
 

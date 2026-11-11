@@ -9,6 +9,22 @@ import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
 import { elicitSelection } from "../utils/elicitation.js";
 import { buildTicketCard, TICKET_CARD_META } from "../card.builder.js";
+import {
+  booleanArg,
+  finiteNumber,
+  pathId,
+  positiveInteger,
+  positiveNumber,
+  syncroRest,
+} from "../utils/rest.js";
+import { guardWrite } from "../utils/write-guard.js";
+import { sdkWrite } from "../utils/write-outcome.js";
+import { MAX_LONG_TEXT_PROMPT, quoteInFull } from "../utils/prompt-text.js";
+import {
+  READ_ONLY,
+  ADDITIVE_WRITE,
+  IDEMPOTENT_WRITE,
+} from "../utils/annotations.js";
 
 /**
  * Get ticket domain tools
@@ -19,6 +35,7 @@ function getTools(): Tool[] {
       name: "syncro_tickets_list",
       description:
         "List tickets in Syncro. Can filter by customer, contact, status, user, problem type, or resolved state.",
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -71,6 +88,7 @@ function getTools(): Tool[] {
       description:
         "Get details for a specific ticket by its ID, including comments",
       _meta: TICKET_CARD_META,
+      annotations: READ_ONLY,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -84,7 +102,9 @@ function getTools(): Tool[] {
     },
     {
       name: "syncro_tickets_create",
-      description: "Create a new ticket in Syncro",
+      description:
+        "Create a new ticket in Syncro. comment_body creates an initial comment that may be visible to the customer, and Syncro may email it to them. This tool cannot mark that comment hidden. If the user did not ask to contact the customer, leave comment_body out and add an internal note afterwards with syncro_tickets_add_comment and hidden: true.",
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -118,7 +138,8 @@ function getTools(): Tool[] {
           },
           comment_body: {
             type: "string",
-            description: "Initial comment/description body",
+            description:
+              "Initial comment/description body. May be visible to the customer and emailed to them; this tool cannot make it hidden",
           },
           comment_subject: {
             type: "string",
@@ -131,6 +152,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_tickets_update",
       description: "Update an existing ticket in Syncro",
+      annotations: IDEMPOTENT_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -164,8 +186,10 @@ function getTools(): Tool[] {
     },
     {
       name: "syncro_tickets_add_comment",
-      description: "Add a comment to an existing ticket",
+      description:
+        "Add a comment to an existing ticket. Unless hidden is true, the comment is public: the customer can see it and Syncro emails it to them. Set hidden: true for an internal note the customer does not see. Set do_not_email: true to stop the notification email; a public comment with do_not_email: true is still visible to the customer. This tool does not set either flag for you. If the user did not ask to contact the customer, use hidden: true.",
       _meta: TICKET_CARD_META,
+      annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -183,14 +207,44 @@ function getTools(): Tool[] {
           },
           hidden: {
             type: "boolean",
-            description: "Make this a hidden/internal comment",
+            description:
+              "Make this an internal comment that the customer does not see. If not true, the comment is public and is emailed to the customer",
           },
           do_not_email: {
             type: "boolean",
-            description: "Do not send email notification for this comment",
+            description:
+              "Do not send the notification email for this comment. A public comment is still visible to the customer",
           },
         },
         required: ["ticket_id", "body"],
+      },
+    },
+    {
+      name: "syncro_tickets_add_line_item",
+      description:
+        "⚠ HIGH-IMPACT. Add a billable line item (labor, part, or fee) to a ticket so it is carried onto the ticket's invoice. Use product_id for a catalog item, or name + price_retail for a manual charge. Not idempotent: a retry adds the charge twice. Confirm with the user before invoking.",
+      annotations: ADDITIVE_WRITE,
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          ticket_id: { type: "number", description: "The ticket ID (required)" },
+          name: {
+            type: "string",
+            description:
+              "Line item name (required), shown in the confirmation prompt exactly as sent. Up to 200 characters. Refused, with no prompt and no request, if it contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space)",
+          },
+          description: {
+            type: "string",
+            description:
+              "Line item description (required by Syncro), shown in the confirmation prompt exactly as sent. Up to 1000 characters. Refused, with no prompt and no request, if it contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space)",
+          },
+          quantity: { type: "number", description: "Quantity, greater than 0 (default: 1)" },
+          price_retail: { type: "number", description: "Unit price charged to the customer" },
+          price_cost: { type: "number", description: "Unit cost" },
+          product_id: { type: "integer", description: "Catalog product ID" },
+          taxable: { type: "boolean", description: "Whether the line is taxable" },
+        },
+        required: ["ticket_id", "name", "description"],
       },
     },
   ];
@@ -272,7 +326,7 @@ async function handleCall(
     }
 
     case "syncro_tickets_get": {
-      const ticketId = args.ticket_id as number;
+      const ticketId = pathId(args.ticket_id, "ticket_id");
       const ticket = await client.tickets.get(ticketId);
 
       // MCP Apps: attach the normalized card payload the ui:// ticket card
@@ -297,17 +351,19 @@ async function handleCall(
     }
 
     case "syncro_tickets_create": {
-      const ticket = await client.tickets.create({
-        customer_id: args.customer_id as number,
-        subject: args.subject as string,
-        problem_type: args.problem_type as string | undefined,
-        status: args.status as string | undefined,
-        contact_id: args.contact_id as number | undefined,
-        user_id: args.user_id as number | undefined,
-        due_date: args.due_date as string | undefined,
-        comment_body: args.comment_body as string | undefined,
-        comment_subject: args.comment_subject as string | undefined,
-      });
+      const ticket = await sdkWrite((sdk) =>
+        sdk.tickets.create({
+          customer_id: args.customer_id as number,
+          subject: args.subject as string,
+          problem_type: args.problem_type as string | undefined,
+          status: args.status as string | undefined,
+          contact_id: args.contact_id as number | undefined,
+          user_id: args.user_id as number | undefined,
+          due_date: args.due_date as string | undefined,
+          comment_body: args.comment_body as string | undefined,
+          comment_subject: args.comment_subject as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(ticket, null, 2) }],
@@ -315,14 +371,16 @@ async function handleCall(
     }
 
     case "syncro_tickets_update": {
-      const ticketId = args.ticket_id as number;
-      const ticket = await client.tickets.update(ticketId, {
-        subject: args.subject as string | undefined,
-        problem_type: args.problem_type as string | undefined,
-        status: args.status as string | undefined,
-        user_id: args.user_id as number | undefined,
-        due_date: args.due_date as string | undefined,
-      });
+      const ticketId = pathId(args.ticket_id, "ticket_id");
+      const ticket = await sdkWrite((sdk) =>
+        sdk.tickets.update(ticketId, {
+          subject: args.subject as string | undefined,
+          problem_type: args.problem_type as string | undefined,
+          status: args.status as string | undefined,
+          user_id: args.user_id as number | undefined,
+          due_date: args.due_date as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(ticket, null, 2) }],
@@ -330,16 +388,79 @@ async function handleCall(
     }
 
     case "syncro_tickets_add_comment": {
-      const ticketId = args.ticket_id as number;
-      const ticket = await client.tickets.addComment(ticketId, {
-        body: args.body as string,
-        subject: args.subject as string | undefined,
-        hidden: args.hidden as boolean | undefined,
-        do_not_email: args.do_not_email as boolean | undefined,
-      });
+      const ticketId = pathId(args.ticket_id, "ticket_id");
+      const ticket = await sdkWrite((sdk) =>
+        sdk.tickets.addComment(ticketId, {
+          body: args.body as string,
+          subject: args.subject as string | undefined,
+          hidden: args.hidden as boolean | undefined,
+          do_not_email: args.do_not_email as boolean | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(ticket, null, 2) }],
+      };
+    }
+
+    case "syncro_tickets_add_line_item": {
+      const ticketId = pathId(args.ticket_id, "ticket_id");
+      const quantity =
+        args.quantity === undefined ? 1 : positiveNumber(args.quantity, "quantity");
+      const priceRetail =
+        args.price_retail === undefined
+          ? undefined
+          : finiteNumber(args.price_retail, "price_retail");
+      const priceCost =
+        args.price_cost === undefined
+          ? undefined
+          : finiteNumber(args.price_cost, "price_cost");
+      const productId =
+        args.product_id === undefined
+          ? undefined
+          : positiveInteger(args.product_id, "product_id");
+      const taxable =
+        args.taxable === undefined ? undefined : booleanArg(args.taxable, "taxable");
+      // Every field that is sent below is shown here, and name and
+      // description in full (or the call is refused).
+      const name =
+        args.name === undefined
+          ? "an item with no name"
+          : quoteInFull(args.name, "name");
+      const description =
+        args.description === undefined
+          ? "not set"
+          : quoteInFull(args.description, "description", MAX_LONG_TEXT_PROMPT);
+      const details = [
+        `unit price ${priceRetail ?? "not set"}`,
+        `unit cost ${priceCost ?? "not set"}`,
+        `catalog product ${productId ?? "none"}`,
+        `taxable ${taxable ?? "not set"}`,
+        `description ${description}`,
+      ].join(", ");
+      const blocked = await guardWrite(
+        `Add ${quantity} x ${name} (${details}) to Syncro ticket ${ticketId}?`
+      );
+      if (blocked) return blocked;
+
+      const lineItem = await syncroRest<Record<string, unknown>>(
+        `/tickets/${ticketId}/add_line_item`,
+        {
+          method: "POST",
+          body: {
+            name: args.name,
+            description: args.description,
+            quantity,
+            price_retail: priceRetail,
+            price_cost: priceCost,
+            product_id: productId,
+            taxable,
+          },
+        }
+      );
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(lineItem, null, 2) }],
       };
     }
 
