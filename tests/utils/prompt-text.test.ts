@@ -137,6 +137,7 @@ describe("quoteInFull", () => {
     ["Hangul choseong filler", "a\u115fb", "115F"],
     ["Hangul jungseong filler", "a\u1160b", "1160"],
     ["Khmer inherent vowel", "a\u17b4b", "17B4"],
+    ["Khmer inherent vowel (aa)", "a\u17b5b", "17B5"],
     ["combining grapheme joiner", "a\u034fb", "034F"],
   ])("refuses a value containing a %s, and names it", (_name, value, codePoint) => {
     expect(() => quoteInFull(value, "message")).toThrow(
