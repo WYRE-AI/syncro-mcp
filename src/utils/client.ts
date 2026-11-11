@@ -34,6 +34,9 @@ import type { SyncroClient } from "@wyre-ai/node-syncro";
 import { getRequestCredentials } from "./credential-store.js";
 import { cleanCredential } from "./clean-credential.js";
 
+/** One DNS label: letters, digits and inner hyphens, at most 63 characters. */
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+
 export interface SyncroCredentials {
   apiKey: string;
   subdomain?: string;
@@ -149,6 +152,17 @@ export async function getClient(): Promise<SyncroClient> {
       "SYNCRO_SUBDOMAIN is required. Please configure the SYNCRO_SUBDOMAIN " +
         "environment variable with your Syncro subdomain " +
         '(e.g. "acme" for acme.syncromsp.com).'
+    );
+  }
+
+  // The subdomain becomes the host (`https://<subdomain>.syncromsp.com`), so a
+  // value such as "evil.example/x#" would send the API key to another host.
+  // Both the SDK client and the REST helper get their host from this client,
+  // so this is the one place that has to check it. The value is not echoed.
+  if (!DNS_LABEL.test(creds.subdomain)) {
+    throw new Error(
+      "SYNCRO_SUBDOMAIN must be a single subdomain label of letters, digits " +
+        'and hyphens (e.g. "acme" for acme.syncromsp.com), not a host name or URL.'
     );
   }
 

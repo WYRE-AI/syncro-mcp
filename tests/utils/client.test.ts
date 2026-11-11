@@ -200,6 +200,58 @@ describe("client.ts", () => {
       // The placeholder never reached the SDK constructor.
       expect(mockSyncroClient).not.toHaveBeenCalled();
     });
+
+    // The subdomain is placed in the host, so anything that is not one DNS
+    // label could redirect the API key to another host.
+    it.each([
+      "evil.example/x#",
+      "evil.example#",
+      "evil.example",
+      "co.syncromsp.com",
+      "evil.example/",
+      "evil.example?",
+      "user@evil.example",
+      "evil.example:8443",
+      "acme\\evil",
+      "acme evil",
+      "-acme",
+      "acme-",
+      "a".repeat(64),
+    ])("should reject the subdomain %j without building a client", async (subdomain) => {
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
+      const mockSyncroClient = vi.mocked(SyncroClient);
+
+      process.env.SYNCRO_API_KEY = "test-api-key";
+      process.env.SYNCRO_SUBDOMAIN = subdomain;
+
+      const err = await getClient().catch((e: Error) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("single subdomain label");
+      expect((err as Error).message).not.toContain(subdomain);
+      expect(mockSyncroClient).not.toHaveBeenCalled();
+    });
+
+    it.each(["acme", "Acme", "my-co", "co2", "a", "a".repeat(63)])(
+      "should accept the subdomain %j",
+      async (subdomain) => {
+        process.env.SYNCRO_API_KEY = "test-api-key";
+        process.env.SYNCRO_SUBDOMAIN = subdomain;
+
+        await expect(getClient()).resolves.toBeDefined();
+      }
+    );
+
+    it("should reject a bad subdomain that arrives with gateway request credentials", async () => {
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
+      const mockSyncroClient = vi.mocked(SyncroClient);
+
+      await credentialStore.run(
+        { apiKey: "header-key", subdomain: "evil.example/x#" },
+        () => runWithClientScope(() => expect(getClient()).rejects.toThrow("single subdomain label"))
+      );
+      expect(mockSyncroClient).not.toHaveBeenCalled();
+    });
   });
 
   describe("runWithClientScope (tenant isolation)", () => {

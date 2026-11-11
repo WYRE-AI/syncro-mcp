@@ -107,7 +107,7 @@ Copy [`.env.example`](.env.example) and set the variables below.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `SYNCRO_API_KEY` | For stdio and `AUTH_MODE=env` | Your Syncro API key |
-| `SYNCRO_SUBDOMAIN` | No | Your Syncro subdomain (if applicable) |
+| `SYNCRO_SUBDOMAIN` | No | Your Syncro subdomain, for example `acme` for `acme.syncromsp.com`. Letters, digits and hyphens only; a host name or URL is rejected before any request is sent. |
 | `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
 | `AUTH_MODE` | No | `gateway` (Docker image and Compose default) or `env`. Gateway mode requires `X-Syncro-API-Key` on each `/mcp` request and never falls back to `SYNCRO_*`. `env` uses those variables only after S2S auth succeeds. |
 | `CONDUIT_S2S_SECRET` | Yes for HTTP | Service-to-service secret. The HTTP server logs an error and exits non-zero when this is empty or a known placeholder (`changeme`, `your-s2s-secret`, `replace-with-a-real-secret`, `secret`, an unresolved `${...}` value, and the other example strings). Compose will not start without it. Never commit a real value. Generate one with `openssl rand -hex 32`. |

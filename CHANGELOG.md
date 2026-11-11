@@ -2,6 +2,16 @@
 
 ### Security
 
+- **The Syncro subdomain is validated before it becomes a host name.** It was
+  used as-is in `https://<subdomain>.syncromsp.com`, so a value containing `/`
+  or `#` (for example from the `X-Syncro-Subdomain` header or
+  `SYNCRO_SUBDOMAIN`) could send the API key to another host. `getClient()` in
+  `src/utils/client.ts` now accepts only one DNS label (letters, digits and
+  inner hyphens, at most 63 characters) and otherwise fails with a clear error
+  and no outbound request. Both the SDK-backed tools and the new REST helper
+  build their host from that client, so both are covered. A value such as
+  `acme.syncromsp.com` is now rejected; use `acme`.
+
 - **Cross-tenant elicitation/confirmation misroute (gateway mode).** The
   "server reference" used by elicitation helpers (`src/utils/elicitation.ts`
   — `elicitSelection` / `elicitText` / `elicitConfirmation`) was stored in a
