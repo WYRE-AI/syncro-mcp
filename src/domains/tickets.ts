@@ -175,7 +175,8 @@ function getTools(): Tool[] {
     },
     {
       name: "syncro_tickets_add_comment",
-      description: "Add a comment to an existing ticket",
+      description:
+        "Add a comment to an existing ticket. Unless hidden is true, the comment is public: the customer can see it and Syncro emails it to them. Set hidden: true for an internal note the customer does not see. Set do_not_email: true to stop the notification email; a public comment with do_not_email: true is still visible to the customer. This tool does not set either flag for you. If the user did not ask to contact the customer, use hidden: true.",
       _meta: TICKET_CARD_META,
       annotations: ADDITIVE_WRITE,
       inputSchema: {
@@ -195,11 +196,13 @@ function getTools(): Tool[] {
           },
           hidden: {
             type: "boolean",
-            description: "Make this a hidden/internal comment",
+            description:
+              "Make this an internal comment that the customer does not see. If not true, the comment is public and is emailed to the customer",
           },
           do_not_email: {
             type: "boolean",
-            description: "Do not send email notification for this comment",
+            description:
+              "Do not send the notification email for this comment. A public comment is still visible to the customer",
           },
         },
         required: ["ticket_id", "body"],

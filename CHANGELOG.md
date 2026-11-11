@@ -110,6 +110,10 @@
   unclassified or changes class. `syncro_invoices_email` is classified
   destructive, and its description now warns that sending cannot be undone.
 
+- **`syncro_tickets_add_comment` now says that a public comment is emailed to
+  the customer.** The tool and argument descriptions explain `hidden` (internal
+  note) and `do_not_email`. Behaviour and defaults are unchanged.
+
 - **`syncro_invoices_email` now goes through the destructive write guard.**
   It previously called Syncro directly even though it is annotated
   destructive. It now asks the user through MCP elicitation when the client

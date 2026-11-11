@@ -75,6 +75,22 @@ describe("domains/tickets.ts", () => {
       expect(commentTool!.inputSchema.required).toContain("ticket_id");
       expect(commentTool!.inputSchema.required).toContain("body");
     });
+
+    it("should warn in add_comment that a public comment is emailed to the customer", () => {
+      const commentTool = ticketsHandler
+        .getTools()
+        .find((t) => t.name === "syncro_tickets_add_comment");
+      const props = commentTool!.inputSchema.properties as Record<
+        string,
+        { description: string }
+      >;
+
+      expect(commentTool!.description).toContain("Syncro emails it to them");
+      expect(commentTool!.description).toContain("hidden: true");
+      expect(commentTool!.description).toContain("do_not_email: true");
+      expect(props.hidden.description).toContain("emailed to the customer");
+      expect(props.do_not_email.description).toContain("still visible to the customer");
+    });
   });
 
   describe("handleCall", () => {
