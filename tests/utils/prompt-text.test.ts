@@ -112,7 +112,6 @@ describe("quoteInFull", () => {
   it.each([
     ["escape", "a\u001b[2Jb", "001B"],
     ["NUL", "a\u0000b", "0000"],
-    ["carriage return", "a\rb", "000D"],
     ["vertical tab", "a\u000bb", "000B"],
     ["delete", "a\u007fb", "007F"],
     ["C1 control (NEL)", "a\u0085b", "0085"],
@@ -139,10 +138,53 @@ describe("quoteInFull", () => {
     ["Khmer inherent vowel", "a\u17b4b", "17B4"],
     ["Khmer inherent vowel (aa)", "a\u17b5b", "17B5"],
     ["combining grapheme joiner", "a\u034fb", "034F"],
+    ["variation selector-16", "Administrator\ufe0f", "FE0F"],
+    ["variation selector-1", "a\ufe00b", "FE00"],
+    ["supplementary variation selector", "a\u{E0100}b", "E0100"],
+    ["last supplementary variation selector", "a\u{E01EF}b", "E01EF"],
+    ["Mongolian free variation selector one", "a\u180bb", "180B"],
+    ["Mongolian free variation selector two", "a\u180cb", "180C"],
+    ["Mongolian free variation selector three", "a\u180db", "180D"],
+    ["Mongolian free variation selector four", "a\u180fb", "180F"],
+    ["Mongolian vowel separator", "a\u180eb", "180E"],
+    ["no-break space", "a\u00a0b", "00A0"],
+    ["Ogham space mark", "a\u1680b", "1680"],
+    ["en quad", "a\u2000b", "2000"],
+    ["hair space", "a\u200ab", "200A"],
+    ["narrow no-break space", "a\u202fb", "202F"],
+    ["medium mathematical space", "a\u205fb", "205F"],
+    ["ideographic space", "a\u3000b", "3000"],
   ])("refuses a value containing a %s, and names it", (_name, value, codePoint) => {
     expect(() => quoteInFull(value, "message")).toThrow(
       new RegExp(`^message contains the character U\\+${codePoint}, `)
     );
+  });
+
+  it("shows a carriage return as the visible escape \\r, so CRLF text is accepted as sent", () => {
+    expect(quoteInFull("line one\r\nline two", "message")).toBe('"line one\\r\\nline two"');
+  });
+
+  it("accepts the plain space, which is the only separator that can be shown", () => {
+    expect(quoteInFull("a b", "message")).toBe('"a b"');
+  });
+
+  it("accepts nothing in general category C or Z, and nothing default-ignorable, over every code point", () => {
+    const hidden = /[\p{C}\p{Z}]|\p{Default_Ignorable_Code_Point}|\p{Variation_Selector}/u;
+    const shownAsEscapeOrSpace = new Set([0x09, 0x0a, 0x0d, 0x20]);
+    const leaks: string[] = [];
+
+    for (let codePoint = 0; codePoint <= 0x10ffff; codePoint++) {
+      const character = String.fromCodePoint(codePoint);
+      if (shownAsEscapeOrSpace.has(codePoint) || !hidden.test(character)) continue;
+      try {
+        quoteInFull(character, "value");
+        leaks.push(`U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`);
+      } catch {
+        // refused, as it should be
+      }
+    }
+
+    expect(leaks).toEqual([]);
   });
 
   it.each([42, null, undefined, true, { a: 1 }, ["x"]])(

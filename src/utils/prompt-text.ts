@@ -31,15 +31,20 @@ export function quote(value: unknown, max = MAX_PROMPT_VALUE): string {
 }
 
 /**
- * Characters that cannot be shown faithfully in a prompt: control characters
- * other than newline and tab, format characters (zero-width and
- * direction-changing), private-use, unassigned and surrogate code points, line
- * and paragraph separators, and the characters below that are letters or
- * marks in the Unicode tables but draw nothing (Braille blank, Hangul fillers,
- * Khmer inherent vowels, the combining grapheme joiner).
+ * Characters that cannot be shown faithfully in a prompt:
+ *  - control, format, private-use, unassigned and surrogate code points
+ *    (general category C), except newline, carriage return and tab, which
+ *    `JSON.stringify` shows as the visible escapes `\n`, `\r` and `\t`;
+ *  - every separator (category Z) except the plain space, which covers the
+ *    non-breaking and other wide or narrow spaces and the line and paragraph
+ *    separators;
+ *  - default-ignorable code points, which renderers draw as nothing: the
+ *    variation selectors, Hangul and Khmer fillers, the combining grapheme
+ *    joiner and the like, some of which are letters or marks in the tables;
+ *  - the Braille blank, which draws nothing but is not default-ignorable.
  */
 const NOT_SHOWABLE =
-  /[^\P{C}\n\t]|[\p{Zl}\p{Zp}\u115F\u1160\u2800\u3164\uFFA0]|\u034F|\u17B4|\u17B5/u;
+  /[^\P{C}\n\r\t]|[^\P{Z} ]|\p{Default_Ignorable_Code_Point}|\u2800/u;
 
 /**
  * Show a value for a prompt exactly as it will be sent, or refuse it.
@@ -63,7 +68,7 @@ export function quoteInFull(
   if (hidden) {
     const codePoint = hidden[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0");
     throw new Error(
-      `${label} contains the character U+${codePoint}, which cannot be shown in the confirmation prompt. Remove it; only newline and tab are allowed as control characters.`
+      `${label} contains the character U+${codePoint}, which cannot be shown in the confirmation prompt. Remove it; only newline, carriage return and tab are allowed as control characters.`
     );
   }
   const length = [...value].length;
