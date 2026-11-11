@@ -193,7 +193,7 @@ describe("syncro_assets_run_script over the gateway transport", () => {
       });
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toMatch(/must be (an ISO 8601|a positive integer)/);
+      expect(result.content[0].text).toMatch(/must be (a real ISO 8601|a positive integer)/);
       expect(result.content[0].text).not.toContain("approved");
     }
     expect(outbound).toHaveLength(0);
@@ -267,7 +267,7 @@ describe("other writes over the gateway transport", () => {
       });
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toMatch(/must be (an ISO 8601|a finite number)/);
+      expect(result.content[0].text).toMatch(/must be (a real ISO 8601|a positive integer)/);
     }
     expect(outbound).toHaveLength(0);
   });

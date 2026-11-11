@@ -187,6 +187,14 @@ describe("domains/time.ts", () => {
       ["end_at", { end_at: "2026-11-05T14:15:00Z\u001b[2J" }],
       ["duration_minutes", { duration_minutes: "30\nminutes" }],
       ["duration_minutes", { duration_minutes: Infinity }],
+      ["duration_minutes", { duration_minutes: 0 }],
+      ["duration_minutes", { duration_minutes: -15 }],
+      ["duration_minutes", { duration_minutes: 7.5 }],
+      ["start_at", { start_at: "2026-11-05T14:00:00" }],
+      ["start_at", { start_at: "2026-02-31T14:00:00Z" }],
+      ["end_at", { end_at: "2026-11-05T14:15:00" }],
+      ["billable", { billable: "false" }],
+      ["billable", { billable: 0 }],
       ["user_id", { user_id: "8\n9" }],
       ["product_id", { product_id: 0 }],
     ])(
@@ -207,6 +215,22 @@ describe("domains/time.ts", () => {
         expect(rest).not.toHaveBeenCalled();
       }
     );
+
+    it("does not put an id Syncro returned into a path unless it is a positive integer", async () => {
+      rest.mockResolvedValueOnce({ id: "9/../../invoices/5/email", billable: false });
+
+      const result = await timeHandler.handleCall("syncro_time_log_entry", {
+        ticket_id: 5,
+        start_at: "2026-11-05T14:00:00Z",
+        duration_minutes: 15,
+        billable: true,
+      });
+
+      // Only the create call was made; the billable update never left.
+      expect(rest).toHaveBeenCalledTimes(1);
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(text(result)).warning).toContain("must be a positive integer");
+    });
 
     it("skips the billable update when the account default already matches", async () => {
       rest.mockResolvedValueOnce({ id: 12, ticket_id: 5, billable: false });
@@ -256,6 +280,18 @@ describe("domains/time.ts", () => {
   });
 
   describe("syncro_time_set_billable", () => {
+    it.each(["false", "true", 0, 1, null, undefined])(
+      "rejects billable %j, which would be shown as one value and sent as another",
+      async (billable) => {
+        await expect(
+          timeHandler.handleCall("syncro_time_set_billable", { timer_id: 3, billable })
+        ).rejects.toThrow("billable must be true or false");
+
+        expect(guard).not.toHaveBeenCalled();
+        expect(rest).not.toHaveBeenCalled();
+      }
+    );
+
     it("patches the timer", async () => {
       rest.mockResolvedValue({ ticket_timer: { id: 3, billable: false } });
 

@@ -107,7 +107,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_invoices_email",
       description:
-        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. The confirmation prompt shows cc_emails, subject and message in full, so the call is refused if cc_emails or subject is over 200 characters or message is over 1000. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve.",
+        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. The confirmation prompt shows cc_emails, subject and message exactly as sent, so the call is refused if one is not a string, contains a control (other than newline and tab), invisible or unassigned character, or is over its limit (200 characters for cc_emails and subject, 1000 for message). Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve.",
       annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
@@ -187,7 +187,7 @@ async function handleCall(
     }
 
     case "syncro_invoices_get": {
-      const invoiceId = args.invoice_id as number;
+      const invoiceId = pathId(args.invoice_id, "invoice_id");
       const invoice = await client.invoices.get(invoiceId);
 
       return {
@@ -196,8 +196,8 @@ async function handleCall(
     }
 
     case "syncro_invoices_create": {
-      const invoice = await sdkWrite(() =>
-        client.invoices.create({
+      const invoice = await sdkWrite((sdk) =>
+        sdk.invoices.create({
           customer_id: args.customer_id as number,
           date: args.date as string | undefined,
           due_date: args.due_date as string | undefined,
@@ -233,8 +233,8 @@ async function handleCall(
       );
       if (blocked) return blocked;
 
-      await sdkWrite(() =>
-        client.invoices.email(invoiceId, {
+      await sdkWrite((sdk) =>
+        sdk.invoices.email(invoiceId, {
           cc_emails: args.cc_emails as string | undefined,
           subject: args.subject as string | undefined,
           message: args.message as string | undefined,

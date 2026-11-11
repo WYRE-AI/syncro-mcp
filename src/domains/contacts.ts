@@ -7,6 +7,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import { pathId } from "../utils/rest.js";
 import { sdkWrite } from "../utils/write-outcome.js";
 import {
   ADDITIVE_WRITE,
@@ -156,7 +157,7 @@ async function handleCall(
     }
 
     case "syncro_contacts_get": {
-      const contactId = args.contact_id as number;
+      const contactId = pathId(args.contact_id, "contact_id");
       const contact = await client.contacts.get(contactId);
 
       return {
@@ -165,8 +166,8 @@ async function handleCall(
     }
 
     case "syncro_contacts_create": {
-      const contact = await sdkWrite(() =>
-        client.contacts.create({
+      const contact = await sdkWrite((sdk) =>
+        sdk.contacts.create({
           customer_id: args.customer_id as number,
           name: args.name as string,
           email: args.email as string | undefined,

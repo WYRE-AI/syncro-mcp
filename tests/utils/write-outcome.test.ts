@@ -2,8 +2,13 @@
  * Tests for the unknown-outcome note and the SDK write wrapper
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { sdkWrite, withUnknownOutcome } from "../../src/utils/write-outcome.js";
+import * as clientModule from "../../src/utils/client.js";
+
+vi.mock("../../src/utils/client.js", () => ({
+  getWriteClient: vi.fn().mockResolvedValue({ marker: "write-client" }),
+}));
 
 const NOTE = "The change may or may not have been applied; check Syncro before retrying.";
 
@@ -26,6 +31,23 @@ describe("sdkWrite", () => {
 
   it("returns the result of a successful call", async () => {
     await expect(sdkWrite(async () => ({ id: 1 }))).resolves.toEqual({ id: 1 });
+  });
+
+  it("hands the call the single-attempt write client", async () => {
+    await expect(sdkWrite(async (client) => client)).resolves.toEqual({
+      marker: "write-client",
+    });
+  });
+
+  it("does not add the note when there is no client to write with", async () => {
+    const missing = new Error("No API credentials provided.");
+    vi.mocked(clientModule.getWriteClient).mockRejectedValueOnce(missing);
+    const call = vi.fn();
+
+    const err = await sdkWrite(call).catch((e) => e);
+
+    expect(err).toBe(missing);
+    expect(call).not.toHaveBeenCalled();
   });
 
   it.each([500, 502, 503, 504])("adds the note to a %i", async (status) => {

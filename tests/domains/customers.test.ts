@@ -9,6 +9,7 @@ import * as clientModule from "../../src/utils/client.js";
 // Mock the client module
 vi.mock("../../src/utils/client.js", () => ({
   getClient: vi.fn(),
+  getWriteClient: vi.fn(),
   getCredentials: vi.fn(),
   clearClient: vi.fn(),
 }));
@@ -25,6 +26,7 @@ describe("domains/customers.ts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
+    vi.mocked(clientModule.getWriteClient).mockResolvedValue(mockClient as never);
   });
 
   describe("getTools", () => {

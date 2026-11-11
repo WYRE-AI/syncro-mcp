@@ -14,7 +14,13 @@
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
-import { finiteNumber, isoTimestamp, pathId, syncroRest } from "../utils/rest.js";
+import {
+  booleanArg,
+  isoTimestamp,
+  pathId,
+  positiveInteger,
+  syncroRest,
+} from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
 import { quote } from "../utils/prompt-text.js";
 import {
@@ -95,15 +101,17 @@ function getTools(): Tool[] {
           ticket_id: { type: "number", description: "Ticket to log time against" },
           start_at: {
             type: "string",
-            description: "Start of the work window (ISO 8601 with offset)",
+            description:
+              "Start of the work window (ISO 8601 date-time with Z or an offset, e.g. 2026-11-07T09:00:00-05:00)",
           },
           end_at: {
             type: "string",
-            description: "End of the work window (ISO 8601). Alternative to duration_minutes",
+            description:
+              "End of the work window (ISO 8601 date-time with Z or an offset). Alternative to duration_minutes",
           },
           duration_minutes: {
-            type: "number",
-            description: "Minutes worked. Alternative to end_at",
+            type: "integer",
+            description: "Whole minutes worked, greater than 0. Alternative to end_at",
           },
           billable: {
             type: "boolean",
@@ -201,15 +209,19 @@ async function handleCall(
       const minutes =
         args.duration_minutes === undefined
           ? undefined
-          : finiteNumber(args.duration_minutes, "duration_minutes");
+          : positiveInteger(args.duration_minutes, "duration_minutes");
       const userId =
-        args.user_id === undefined ? undefined : pathId(args.user_id, "user_id");
+        args.user_id === undefined
+          ? undefined
+          : positiveInteger(args.user_id, "user_id");
       const productId =
         args.product_id === undefined
           ? undefined
-          : pathId(args.product_id, "product_id");
-
-      const billable = args.billable as boolean | undefined;
+          : positiveInteger(args.product_id, "product_id");
+      const billable =
+        args.billable === undefined
+          ? undefined
+          : booleanArg(args.billable, "billable");
       const span =
         `starting ${startAt}` +
         (endAt ? `, ending ${endAt}` : "") +
@@ -253,7 +265,7 @@ async function handleCall(
       // report it instead of failing, because a retry would log it twice.
       try {
         const updated = await syncroRest<{ ticket_timer: TicketTimer }>(
-          `/ticket_timers/${entry.id}`,
+          `/ticket_timers/${pathId(entry.id, "the new time entry's id")}`,
           { method: "PATCH", body: { billable } }
         );
         return json({ time_entry: updated.ticket_timer ?? entry });
@@ -280,7 +292,7 @@ async function handleCall(
 
     case "syncro_time_set_billable": {
       const timerId = pathId(args.timer_id, "timer_id");
-      const billable = args.billable as boolean;
+      const billable = booleanArg(args.billable, "billable");
       const blocked = await guardWrite(
         `Mark Syncro time entry ${timerId} as ${billable ? "billable" : "non-billable"}?`
       );

@@ -54,12 +54,15 @@ export interface SyncroCredentials {
  * or invalidate each other's cached client.
  */
 interface ClientScope {
+  /** Client for reads: the SDK default, which retries a 429 or 5xx. */
   client: SyncroClient | null;
+  /** Client for writes: one attempt only, see {@link getWriteClient}. */
+  writeClient: SyncroClient | null;
   credentials: SyncroCredentials | null;
 }
 
 function createScope(): ClientScope {
-  return { client: null, credentials: null };
+  return { client: null, writeClient: null, credentials: null };
 }
 
 const clientScopeStore = new AsyncLocalStorage<ClientScope>();
@@ -135,10 +138,8 @@ export function getCredentials(): SyncroCredentials | null {
   return { apiKey, subdomain };
 }
 
-/**
- * Get or create the Syncro client (lazy initialization)
- */
-export async function getClient(): Promise<SyncroClient> {
+/** The configured credentials, or an error saying what is missing or invalid. */
+function requireCredentials(): Required<SyncroCredentials> {
   const creds = getCredentials();
 
   if (!creds) {
@@ -171,29 +172,57 @@ export async function getClient(): Promise<SyncroClient> {
     );
   }
 
+  return { apiKey: creds.apiKey, subdomain: creds.subdomain };
+}
+
+/**
+ * Get the cached client in `slot`, creating it on first use. A change of
+ * credentials drops both cached clients first.
+ */
+async function cachedClient(
+  slot: "client" | "writeClient",
+  rateLimit?: { maxRetries: number }
+): Promise<SyncroClient> {
+  const creds = requireCredentials();
   const scope = getScope();
 
-  // If credentials changed, invalidate the cached client
   if (
-    scope.client &&
     scope.credentials &&
     (creds.apiKey !== scope.credentials.apiKey ||
       creds.subdomain !== scope.credentials.subdomain)
   ) {
     scope.client = null;
+    scope.writeClient = null;
   }
 
-  if (!scope.client) {
+  let client = scope[slot];
+  if (!client) {
     // Lazy import the library
     const { SyncroClient } = await import("@wyre-ai/node-syncro");
-    scope.client = new SyncroClient({
-      apiKey: creds.apiKey,
-      subdomain: creds.subdomain,
-    });
+    client = new SyncroClient({ ...creds, ...(rateLimit ? { rateLimit } : {}) });
+    scope[slot] = client;
     scope.credentials = creds;
   }
 
-  return scope.client;
+  return client;
+}
+
+/**
+ * Get or create the Syncro client for reads (lazy initialization). The SDK
+ * retries a 429 or 5xx on it, which is safe for a GET.
+ */
+export function getClient(): Promise<SyncroClient> {
+  return cachedClient("client");
+}
+
+/**
+ * Get or create the Syncro client for writes. The SDK resends a request after
+ * a 429 or 5xx, which for a POST can send an email or create a record more
+ * than once, so this client makes exactly one attempt. The SDK keeps a rate
+ * limit budget per client, so reads and writes each count against their own.
+ */
+export function getWriteClient(): Promise<SyncroClient> {
+  return cachedClient("writeClient", { maxRetries: 0 });
 }
 
 /**
@@ -202,5 +231,6 @@ export async function getClient(): Promise<SyncroClient> {
 export function clearClient(): void {
   const scope = getScope();
   scope.client = null;
+  scope.writeClient = null;
   scope.credentials = null;
 }

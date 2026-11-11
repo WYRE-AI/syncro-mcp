@@ -70,8 +70,16 @@ describe("quote", () => {
 });
 
 describe("quoteInFull", () => {
-  it("sanitises and quotes the same way", () => {
-    expect(quoteInFull('a"\n\u001bb', "run_as")).toBe('"a\\" b"');
+  it("shows the raw value as a JSON string, so a quote is escaped", () => {
+    expect(quoteInFull('say "hi"', "run_as")).toBe('"say \\"hi\\""');
+  });
+
+  it("shows a newline and a tab as visible escapes instead of collapsing them", () => {
+    expect(quoteInFull("a\nb\tc", "message")).toBe('"a\\nb\\tc"');
+  });
+
+  it("keeps ordinary non-ASCII text, including emoji and accents", () => {
+    expect(quoteInFull("café 😀 日本語", "message")).toBe('"café 😀 日本語"');
   });
 
   it("accepts a value of exactly the limit", () => {
@@ -89,8 +97,63 @@ describe("quoteInFull", () => {
     expect(quoteInFull("x".repeat(10), "message", 10)).toBe(`"${"x".repeat(10)}"`);
   });
 
-  it("measures the value as it will be shown, not as it was sent", () => {
-    // 150 characters plus 100 newlines collapse to a short line.
-    expect(() => quoteInFull(`${"x".repeat(150)}${"\n".repeat(100)}`, "m")).not.toThrow();
+  it("measures the limit on the raw value, so a run of newlines counts", () => {
+    // 150 characters plus 100 newlines is 250 characters sent, not a short line.
+    expect(() =>
+      quoteInFull(`${"x".repeat(150)}${"\n".repeat(100)}`, "message", 200)
+    ).toThrow(/message is 250 characters, over the 200/);
+  });
+
+  it("counts an emoji as one character, not two", () => {
+    expect(quoteInFull("😀".repeat(200), "run_as")).toContain("😀");
+    expect(() => quoteInFull("😀".repeat(201), "run_as")).toThrow(/201 characters/);
+  });
+
+  it.each([
+    ["escape", "a\u001b[2Jb", "001B"],
+    ["NUL", "a\u0000b", "0000"],
+    ["carriage return", "a\rb", "000D"],
+    ["vertical tab", "a\u000bb", "000B"],
+    ["delete", "a\u007fb", "007F"],
+    ["C1 control (NEL)", "a\u0085b", "0085"],
+    ["zero-width space", "a\u200bb", "200B"],
+    ["zero-width joiner", "a\u200db", "200D"],
+    ["right-to-left override", "a\u202eb", "202E"],
+    ["right-to-left isolate", "a\u2067b", "2067"],
+    ["Arabic letter mark", "a\u061cb", "061C"],
+    ["byte order mark", "a\ufeffb", "FEFF"],
+    ["soft hyphen", "a\u00adb", "00AD"],
+    ["tag character", "a\u{E0041}b", "E0041"],
+    ["private use", "a\ue000b", "E000"],
+    ["supplementary private use", "a\u{F0000}b", "F0000"],
+    ["unassigned code point", "a\u0378b", "0378"],
+    ["lone high surrogate", "a\ud800b", "D800"],
+    ["lone low surrogate", "a\udc00b", "DC00"],
+    ["line separator", "a\u2028b", "2028"],
+    ["paragraph separator", "a\u2029b", "2029"],
+    ["Braille blank", "a\u2800b", "2800"],
+    ["Hangul filler", "a\u3164b", "3164"],
+    ["halfwidth Hangul filler", "a\uffa0b", "FFA0"],
+    ["Hangul choseong filler", "a\u115fb", "115F"],
+    ["Hangul jungseong filler", "a\u1160b", "1160"],
+    ["Khmer inherent vowel", "a\u17b4b", "17B4"],
+    ["combining grapheme joiner", "a\u034fb", "034F"],
+  ])("refuses a value containing a %s, and names it", (_name, value, codePoint) => {
+    expect(() => quoteInFull(value, "message")).toThrow(
+      new RegExp(`^message contains the character U\\+${codePoint}, `)
+    );
+  });
+
+  it.each([42, null, undefined, true, { a: 1 }, ["x"]])(
+    "refuses the non-string value %j",
+    (value) => {
+      expect(() => quoteInFull(value, "subject")).toThrow("subject must be a string");
+    }
+  );
+
+  it("shows what it returns without any character that could hide or reorder text", () => {
+    const shown = quoteInFull("line one\nline two\ttabbed", "message");
+
+    expect(shown).not.toMatch(/[\u0000-\u001f]/);
   });
 });

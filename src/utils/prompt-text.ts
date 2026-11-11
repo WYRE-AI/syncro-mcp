@@ -2,10 +2,11 @@
  * Render caller-supplied text for a confirmation prompt.
  *
  * Every free-text value in a prompt goes through here, so a caller cannot
- * forge prompt text: the value is reduced to one line, stripped of control
- * and format characters (ESC, NUL, right-to-left override and the like), and
- * shown as a JSON string, so a quote inside it is escaped and the value is
- * visibly delimited from the sentence around it.
+ * forge prompt text. {@link quote} shows a value that cannot change what the
+ * action does: it is reduced to one line, stripped of control and format
+ * characters (ESC, NUL, right-to-left override and the like), cut when long,
+ * and shown as a JSON string. {@link quoteInFull} shows a value the user must
+ * see exactly as it is sent, so it never cleans or cuts: it refuses instead.
  */
 
 /** Longest value {@link quote} and {@link quoteInFull} show by default. */
@@ -30,21 +31,46 @@ export function quote(value: unknown, max = MAX_PROMPT_VALUE): string {
 }
 
 /**
- * Show a value for a prompt in full, or refuse it: a value longer than `max`
- * throws instead of being cut, so the user never approves text they were not
- * shown. `label` names the value in the error.
+ * Characters that cannot be shown faithfully in a prompt: control characters
+ * other than newline and tab, format characters (zero-width and
+ * direction-changing), private-use, unassigned and surrogate code points, line
+ * and paragraph separators, and the characters below that are letters or
+ * marks in the Unicode tables but draw nothing (Braille blank, Hangul fillers,
+ * Khmer inherent vowels, the combining grapheme joiner).
+ */
+const NOT_SHOWABLE =
+  /[^\P{C}\n\t]|[\p{Zl}\p{Zp}\u115F\u1160\u2800\u3164\uFFA0]|\u034F|\u17B4|\u17B5/u;
+
+/**
+ * Show a value for a prompt exactly as it will be sent, or refuse it.
+ *
+ * The user approves what the prompt shows, so nothing may differ between the
+ * two: the value is shown as a JSON string of the raw text (a newline appears
+ * as `\n`, a quote is escaped), its length is measured on the raw text, and a
+ * value that is not a string, is longer than `max` characters, or contains a
+ * character that would not show up in the prompt throws instead of being
+ * cleaned or cut. `label` names the value in the error.
  */
 export function quoteInFull(
   value: unknown,
   label: string,
   max = MAX_PROMPT_VALUE
 ): string {
-  const text = oneLine(value);
-  const length = [...text].length;
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string`);
+  }
+  const hidden = NOT_SHOWABLE.exec(value);
+  if (hidden) {
+    const codePoint = hidden[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0");
+    throw new Error(
+      `${label} contains the character U+${codePoint}, which cannot be shown in the confirmation prompt. Remove it; only newline and tab are allowed as control characters.`
+    );
+  }
+  const length = [...value].length;
   if (length > max) {
     throw new Error(
       `${label} is ${length} characters, over the ${max} that can be shown in full in the confirmation prompt. Shorten it.`
     );
   }
-  return JSON.stringify(text);
+  return JSON.stringify(value);
 }

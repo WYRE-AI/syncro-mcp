@@ -165,7 +165,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_assets_run_script",
       description:
-        "⚠ DESTRUCTIVE — RUNS CODE ON A MANAGED DEVICE. Schedule an existing Syncro RMM script to run once on an asset, now or at a set time (e.g. a patch-install or remediation script). The script ID comes from the Syncro script library; the API has no endpoint to list scripts. The confirmation prompt lists every variable in full, so the call is refused if run_as or a variable name or value is over 200 characters, or the variables together are over 1000 when listed. Requires the 'Scripts - Execute' permission. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve this exact run.",
+        "⚠ DESTRUCTIVE — RUNS CODE ON A MANAGED DEVICE. Schedule an existing Syncro RMM script to run once on an asset, now or at a set time (e.g. a patch-install or remediation script). The script ID comes from the Syncro script library; the API has no endpoint to list scripts. The confirmation prompt shows run_as and every variable exactly as sent, so the call is refused if run_as or a variable name or value is not a string, contains a control (other than newline and tab), invisible or unassigned character, or is over 200 characters, or if the variables together are over 1000 when listed. Requires the 'Scripts - Execute' permission. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve this exact run.",
       annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
@@ -174,7 +174,8 @@ function getTools(): Tool[] {
           script_id: { type: "number", description: "The Syncro script ID" },
           run_at: {
             type: "string",
-            description: "ISO 8601 time to run the script once. Omit to run now",
+            description:
+              "ISO 8601 date-time with Z or an offset (e.g. 2026-11-07T02:00:00Z) to run the script once. Omit to run now",
           },
           run_as: {
             type: "string",
@@ -269,7 +270,7 @@ async function handleCall(
     }
 
     case "syncro_assets_get": {
-      const assetId = args.asset_id as number;
+      const assetId = pathId(args.asset_id, "asset_id");
       const asset = await client.assets.get(assetId);
 
       return {

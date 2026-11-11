@@ -4,9 +4,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
+  booleanArg,
   finiteNumber,
   isoTimestamp,
   pathId,
+  positiveInteger,
+  positiveNumber,
   syncroRest,
   SyncroRestError,
 } from "../../src/utils/rest.js";
@@ -157,6 +160,37 @@ describe("utils/rest.ts", () => {
       }
     );
 
+    it.each(["POST", "PUT", "PATCH"] as const)(
+      "says so when a %s gets a 2xx whose body is not JSON, since it may have been applied",
+      async (method) => {
+        fetchMock.mockResolvedValue(new Response("<html>ok</html>", { status: 200 }));
+
+        const err = await syncroRest("/x", { method }).catch((e) => e);
+
+        expect(err).toBeInstanceOf(SyncroRestError);
+        expect(err.status).toBe(200);
+        expect(err.message).toContain("Expected JSON from");
+        expect(err.message).toMatch(UNKNOWN);
+      }
+    );
+
+    it("adds no note to a read that gets a 2xx whose body is not JSON", async () => {
+      fetchMock.mockResolvedValue(new Response("<html>login</html>", { status: 200 }));
+
+      const err = await syncroRest("/x").catch((e) => e);
+
+      expect(err.message).toContain("Expected JSON from");
+      expect(err.message).not.toMatch(UNKNOWN);
+    });
+
+    it("says so when a write gets a status that is neither a success nor a 4xx", async () => {
+      fetchMock.mockResolvedValue(new Response("moved", { status: 302 }));
+
+      const err = await syncroRest("/x", { method: "POST" }).catch((e) => e);
+
+      expect(err.message).toMatch(UNKNOWN);
+    });
+
     it("does not double the full stop when the error body already ends with one", async () => {
       fetchMock.mockResolvedValue(new Response("Upstream is down.", { status: 502 }));
 
@@ -189,14 +223,52 @@ describe("pathId", () => {
   );
 });
 
+describe("positiveInteger", () => {
+  it.each([1, 15, Number.MAX_SAFE_INTEGER])("accepts %s", (value) => {
+    expect(positiveInteger(value, "duration_minutes")).toBe(value);
+  });
+
+  it.each([0, -1, 1.5, "15", NaN, Infinity, 2 ** 53, null, undefined])(
+    "rejects %j",
+    (value) => {
+      expect(() => positiveInteger(value, "duration_minutes")).toThrow(
+        /duration_minutes must be a positive integer/
+      );
+    }
+  );
+});
+
+describe("positiveNumber", () => {
+  it.each([1, 0.25, 2.5, 1e6])("accepts %s", (value) => {
+    expect(positiveNumber(value, "quantity")).toBe(value);
+  });
+
+  it.each([0, -0.5, -1, NaN, Infinity, "2", null, undefined])("rejects %j", (value) => {
+    expect(() => positiveNumber(value, "quantity")).toThrow(
+      /quantity must be a number greater than 0/
+    );
+  });
+});
+
+describe("booleanArg", () => {
+  it.each([true, false])("accepts %s", (value) => {
+    expect(booleanArg(value, "billable")).toBe(value);
+  });
+
+  it.each(["false", "true", 0, 1, null, undefined, {}])("rejects %j", (value) => {
+    expect(() => booleanArg(value, "billable")).toThrow(/billable must be true or false/);
+  });
+});
+
 describe("isoTimestamp", () => {
   it.each([
     "2026-11-07T02:00:00Z",
     "2026-11-07T02:00:00.123Z",
     "2026-11-07T02:00:00+01:00",
     "2026-11-07T02:00:00-05:00",
-    "2026-11-07T02:00",
-    "2026-11-07T02:00:00",
+    "2026-11-07T02:00Z",
+    "2026-02-28T23:59:59+14:00",
+    "2028-02-29T00:00:00Z",
   ])("accepts %s and returns it unchanged", (value) => {
     expect(isoTimestamp(value, "run_at")).toBe(value);
   });
@@ -204,6 +276,20 @@ describe("isoTimestamp", () => {
   it.each([
     "tomorrow",
     "2026-11-07",
+    // No Z or offset: the time zone would be ambiguous.
+    "2026-11-07T02:00",
+    "2026-11-07T02:00:00",
+    // Impossible dates and times that a loose parser would roll over or accept.
+    "2026-02-31T00:00:00Z",
+    "2026-02-29T00:00:00Z",
+    "2026-04-31T00:00:00Z",
+    "2026-00-10T00:00:00Z",
+    "2026-11-00T00:00:00Z",
+    "2026-11-07T24:00:00Z",
+    "2026-11-07T23:60:00Z",
+    "2026-11-07T23:59:60Z",
+    "2026-11-07T02:00:00+25:00",
+    "2026-11-07T02:00:00+01:60",
     "2026-13-45T02:00:00Z",
     "2026-11-07T25:00:00Z",
     "2026-11-07T02:00:00Z\n",
@@ -216,7 +302,7 @@ describe("isoTimestamp", () => {
     null,
     undefined,
   ])("rejects %j", (value) => {
-    expect(() => isoTimestamp(value, "run_at")).toThrow(/run_at must be an ISO 8601/);
+    expect(() => isoTimestamp(value, "run_at")).toThrow(/run_at must be a real ISO 8601 date-time with Z or an offset/);
   });
 });
 

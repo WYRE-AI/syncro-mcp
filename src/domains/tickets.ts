@@ -9,7 +9,14 @@ import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
 import { elicitSelection } from "../utils/elicitation.js";
 import { buildTicketCard, TICKET_CARD_META } from "../card.builder.js";
-import { finiteNumber, pathId, syncroRest } from "../utils/rest.js";
+import {
+  booleanArg,
+  finiteNumber,
+  pathId,
+  positiveInteger,
+  positiveNumber,
+  syncroRest,
+} from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
 import { sdkWrite } from "../utils/write-outcome.js";
 import { quote } from "../utils/prompt-text.js";
@@ -226,10 +233,10 @@ function getTools(): Tool[] {
             type: "string",
             description: "Line item description (required by Syncro)",
           },
-          quantity: { type: "number", description: "Quantity (default: 1)" },
+          quantity: { type: "number", description: "Quantity, greater than 0 (default: 1)" },
           price_retail: { type: "number", description: "Unit price charged to the customer" },
           price_cost: { type: "number", description: "Unit cost" },
-          product_id: { type: "number", description: "Catalog product ID" },
+          product_id: { type: "integer", description: "Catalog product ID" },
           taxable: { type: "boolean", description: "Whether the line is taxable" },
         },
         required: ["ticket_id", "name", "description"],
@@ -314,7 +321,7 @@ async function handleCall(
     }
 
     case "syncro_tickets_get": {
-      const ticketId = args.ticket_id as number;
+      const ticketId = pathId(args.ticket_id, "ticket_id");
       const ticket = await client.tickets.get(ticketId);
 
       // MCP Apps: attach the normalized card payload the ui:// ticket card
@@ -339,8 +346,8 @@ async function handleCall(
     }
 
     case "syncro_tickets_create": {
-      const ticket = await sdkWrite(() =>
-        client.tickets.create({
+      const ticket = await sdkWrite((sdk) =>
+        sdk.tickets.create({
           customer_id: args.customer_id as number,
           subject: args.subject as string,
           problem_type: args.problem_type as string | undefined,
@@ -359,9 +366,9 @@ async function handleCall(
     }
 
     case "syncro_tickets_update": {
-      const ticketId = args.ticket_id as number;
-      const ticket = await sdkWrite(() =>
-        client.tickets.update(ticketId, {
+      const ticketId = pathId(args.ticket_id, "ticket_id");
+      const ticket = await sdkWrite((sdk) =>
+        sdk.tickets.update(ticketId, {
           subject: args.subject as string | undefined,
           problem_type: args.problem_type as string | undefined,
           status: args.status as string | undefined,
@@ -376,9 +383,9 @@ async function handleCall(
     }
 
     case "syncro_tickets_add_comment": {
-      const ticketId = args.ticket_id as number;
-      const ticket = await sdkWrite(() =>
-        client.tickets.addComment(ticketId, {
+      const ticketId = pathId(args.ticket_id, "ticket_id");
+      const ticket = await sdkWrite((sdk) =>
+        sdk.tickets.addComment(ticketId, {
           body: args.body as string,
           subject: args.subject as string | undefined,
           hidden: args.hidden as boolean | undefined,
@@ -394,14 +401,31 @@ async function handleCall(
     case "syncro_tickets_add_line_item": {
       const ticketId = pathId(args.ticket_id, "ticket_id");
       const quantity =
-        args.quantity === undefined ? 1 : finiteNumber(args.quantity, "quantity");
+        args.quantity === undefined ? 1 : positiveNumber(args.quantity, "quantity");
       const priceRetail =
         args.price_retail === undefined
           ? undefined
           : finiteNumber(args.price_retail, "price_retail");
-      const price = priceRetail === undefined ? "" : ` at ${priceRetail} each`;
+      const priceCost =
+        args.price_cost === undefined
+          ? undefined
+          : finiteNumber(args.price_cost, "price_cost");
+      const productId =
+        args.product_id === undefined
+          ? undefined
+          : positiveInteger(args.product_id, "product_id");
+      const taxable =
+        args.taxable === undefined ? undefined : booleanArg(args.taxable, "taxable");
+      // Every field that is sent below is shown here.
+      const details = [
+        `unit price ${priceRetail ?? "not set"}`,
+        `unit cost ${priceCost ?? "not set"}`,
+        `catalog product ${productId ?? "none"}`,
+        `taxable ${taxable ?? "not set"}`,
+        `description ${quote(args.description)}`,
+      ].join(", ");
       const blocked = await guardWrite(
-        `Add ${quantity} x ${quote(args.name)}${price} to Syncro ticket ${ticketId}?`
+        `Add ${quantity} x ${quote(args.name)} (${details}) to Syncro ticket ${ticketId}?`
       );
       if (blocked) return blocked;
 
@@ -414,9 +438,9 @@ async function handleCall(
             description: args.description,
             quantity,
             price_retail: priceRetail,
-            price_cost: args.price_cost,
-            product_id: args.product_id,
-            taxable: args.taxable,
+            price_cost: priceCost,
+            product_id: productId,
+            taxable,
           },
         }
       );

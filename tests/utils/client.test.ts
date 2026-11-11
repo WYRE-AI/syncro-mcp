@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getCredentials,
   getClient,
+  getWriteClient,
   clearClient,
   isValidSubdomain,
   runWithClientScope,
@@ -252,6 +253,57 @@ describe("client.ts", () => {
         () => runWithClientScope(() => expect(getClient()).rejects.toThrow("single subdomain label"))
       );
       expect(mockSyncroClient).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getWriteClient", () => {
+    beforeEach(() => {
+      process.env.SYNCRO_API_KEY = "test-api-key";
+      process.env.SYNCRO_SUBDOMAIN = "acme";
+    });
+
+    it("builds a client that makes a single attempt, and leaves the read client's retries alone", async () => {
+      const { SyncroClient } = await import("@wyre-ai/node-syncro");
+      const mockSyncroClient = vi.mocked(SyncroClient);
+
+      await getClient();
+      await getWriteClient();
+
+      expect(mockSyncroClient).toHaveBeenNthCalledWith(1, {
+        apiKey: "test-api-key",
+        subdomain: "acme",
+      });
+      expect(mockSyncroClient).toHaveBeenNthCalledWith(2, {
+        apiKey: "test-api-key",
+        subdomain: "acme",
+        rateLimit: { maxRetries: 0 },
+      });
+    });
+
+    it("is a different client from the read client, and is cached", async () => {
+      const write1 = await getWriteClient();
+      const write2 = await getWriteClient();
+
+      expect(write1).toBe(write2);
+      expect(write1).not.toBe(await getClient());
+    });
+
+    it("drops both cached clients when the credentials change", async () => {
+      const read = await getClient();
+      const write = await getWriteClient();
+
+      process.env.SYNCRO_API_KEY = "rotated-key";
+
+      expect(await getWriteClient()).not.toBe(write);
+      expect(await getClient()).not.toBe(read);
+    });
+
+    it("applies the same credential checks as getClient", async () => {
+      process.env.SYNCRO_SUBDOMAIN = "evil.example/x#";
+
+      await expect(getWriteClient()).rejects.toThrow("single subdomain label");
+      delete process.env.SYNCRO_API_KEY;
+      await expect(getWriteClient()).rejects.toThrow("No API credentials provided");
     });
   });
 

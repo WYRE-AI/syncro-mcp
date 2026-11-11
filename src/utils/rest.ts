@@ -41,39 +41,81 @@ export class SyncroRestError extends Error {
 }
 
 /**
- * Validates a tool-supplied ID before it is interpolated into a REST path.
- * Tool arguments are not schema-checked at runtime, so a string such as
- * "../tickets" would otherwise change which endpoint is called.
+ * Validates a tool-supplied whole number that must be positive, such as an ID
+ * or a count of minutes. Tool arguments are not schema-checked at runtime, so
+ * an ID such as "../tickets" would otherwise change which endpoint is called.
  */
-export function pathId(value: unknown, label: string): number {
+export function positiveInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive integer`);
   }
   return value;
 }
 
-/** `YYYY-MM-DDTHH:MM[:SS[.fff]]` with an optional `Z` or `+HH:MM` offset. */
-const ISO_TIMESTAMP =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})?$/;
+/**
+ * Validates an ID before it is interpolated into a request path. Run every ID
+ * that reaches a path through this, whether the request goes through the SDK
+ * or {@link syncroRest}: the SDK does not encode IDs, and `fetch` resolves
+ * `..` segments.
+ */
+export const pathId = positiveInteger;
 
-/** Validates a tool-supplied ISO 8601 date-time before it is sent or shown in a prompt. */
+/** `YYYY-MM-DDTHH:MM[:SS[.fff]]` followed by `Z` or a `+HH:MM` / `-HH:MM` offset. */
+const ISO_TIMESTAMP =
+  /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})T(?<hour>\d{2}):(?<minute>\d{2})(?::(?<second>\d{2})(?:\.\d{1,9})?)?(?:Z|[+-](?<offsetHour>\d{2}):(?<offsetMinute>\d{2}))$/;
+
+/** Whether a matched {@link ISO_TIMESTAMP} names a real date and a time of day in range. */
+function isRealDateTime(groups: Record<string, string | undefined>): boolean {
+  const n = (name: string) => Number(groups[name] ?? 0);
+  const date = new Date(Date.UTC(n("year"), n("month") - 1, n("day")));
+  return (
+    date.getUTCMonth() === n("month") - 1 &&
+    date.getUTCDate() === n("day") &&
+    n("hour") <= 23 &&
+    n("minute") <= 59 &&
+    n("second") <= 59 &&
+    n("offsetHour") <= 23 &&
+    n("offsetMinute") <= 59
+  );
+}
+
+/**
+ * Validates a tool-supplied ISO 8601 date-time before it is sent or shown in
+ * a prompt. It must name a real date and carry `Z` or an offset: without one
+ * the time is ambiguous, and Syncro and this server could read it in
+ * different time zones.
+ */
 export function isoTimestamp(value: unknown, label: string): string {
-  if (
-    typeof value !== "string" ||
-    !ISO_TIMESTAMP.test(value) ||
-    Number.isNaN(Date.parse(value))
-  ) {
+  const groups =
+    typeof value === "string" ? ISO_TIMESTAMP.exec(value)?.groups : undefined;
+  if (!groups || !isRealDateTime(groups)) {
     throw new Error(
-      `${label} must be an ISO 8601 date-time such as 2026-11-07T02:00:00Z`
+      `${label} must be a real ISO 8601 date-time with Z or an offset, such as 2026-11-07T02:00:00Z`
     );
   }
-  return value;
+  return value as string;
 }
 
 /** Validates a tool-supplied number before it is sent or shown in a prompt. */
 export function finiteNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`${label} must be a finite number`);
+  }
+  return value;
+}
+
+/** Validates a tool-supplied flag: a string such as "false" is truthy, so only a real boolean passes. */
+export function booleanArg(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`${label} must be true or false`);
+  }
+  return value;
+}
+
+/** Validates a tool-supplied amount that must be above zero, such as a quantity. */
+export function positiveNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be a number greater than 0`);
   }
   return value;
 }
@@ -108,9 +150,11 @@ function describeNetworkError(err: unknown): string {
  * @param options HTTP method (default `GET`), query params and JSON body.
  * @returns The parsed JSON response, or `{}` when the body is empty.
  * @throws {SyncroRestError} On a non-2xx status, a non-JSON success body, or a
- *   timeout or network error (status `0`). A write that timed out, hit a
- *   network error or got a 5xx may still have been applied, and its message
- *   says so; a 4xx is a plain rejection.
+ *   timeout or network error (status `0`). For a write (any method but `GET`),
+ *   only a 4xx response is a plain rejection; a timeout, network error, any
+ *   other status, or a 2xx body that is not JSON may follow a change that was
+ *   applied, and the message says so. A `GET` never carries the note. The call
+ *   is made once and never retried.
  */
 export async function syncroRest<T>(
   path: string,
@@ -155,13 +199,18 @@ export async function syncroRest<T>(
       undefined
     );
   }
+  // Only a 4xx means Syncro rejected the request. A write that got any other
+  // answer may already have been applied, so its error carries the note.
+  const rejected = response.status >= 400 && response.status < 500;
+  const outcomeKnown = method === "GET" || rejected;
   let parsed: unknown = raw;
   try {
     parsed = raw.trim() === "" ? {} : JSON.parse(raw);
   } catch {
     if (response.ok) {
+      const message = `Expected JSON from ${method} ${path} but got: ${raw.slice(0, 200)}`;
       throw new SyncroRestError(
-        `Expected JSON from ${method} ${path} but got: ${raw.slice(0, 200)}`,
+        outcomeKnown ? message : withUnknownOutcome(message),
         response.status,
         raw
       );
@@ -170,12 +219,8 @@ export async function syncroRest<T>(
 
   if (!response.ok) {
     const message = `Syncro API ${method} ${path} failed (${response.status}): ${describeErrorBody(parsed)}`;
-    // A 4xx means Syncro rejected the request. A 5xx can come after the change
-    // was already applied, so a write that got one has an unknown outcome.
     throw new SyncroRestError(
-      response.status >= 500 && method !== "GET"
-        ? withUnknownOutcome(message)
-        : message,
+      outcomeKnown ? message : withUnknownOutcome(message),
       response.status,
       parsed
     );
