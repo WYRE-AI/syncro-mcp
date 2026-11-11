@@ -24,11 +24,20 @@
   collapse whitespace and drop control characters for display while sending the
   raw value, and measured length limits on the collapsed text. They now refuse
   a value that is not a string or that contains a control character other than
-  newline and tab, a format, private-use, unassigned or surrogate character, a
-  line or paragraph separator, or a character that draws nothing (for example
-  U+2800, U+3164, U+FFA0, U+115F, U+1160). Length limits are measured on the
-  raw value, and the prompt shows the raw value as a JSON string, so a newline
-  appears as `\n`. One helper, `quoteInFull` in `src/utils/prompt-text.ts`.
+  newline, carriage return and tab; a format, private-use, unassigned or
+  surrogate character; any space or separator other than the plain space
+  (no-break and other wide or narrow spaces, line and paragraph separators); or
+  a character that draws nothing: any default-ignorable code point (variation
+  selectors such as U+FE0F and U+E0100 to U+E01EF, the Mongolian free variation
+  selectors, the Hangul and Khmer fillers, U+034F) and the Braille blank
+  U+2800. A carriage return is accepted because the prompt shows it as the
+  visible escape `\r`, exactly as it is sent, so CRLF line endings in an email
+  message or a script variable work. Length limits are measured on the raw
+  value (a CRLF is two characters), and the prompt shows the raw value as a
+  JSON string, so a newline appears as `\n`. One helper, `quoteInFull` in
+  `src/utils/prompt-text.ts`, which a test runs over every code point to check
+  that nothing in general category C or Z (other than the plain space) or with
+  `Default_Ignorable_Code_Point` is accepted.
 
 - **A malformed `Host` header or request target no longer stops the HTTP
   server.** The listener parsed the request target against the client's `Host`
@@ -134,14 +143,15 @@
     and description) is reduced to one line, stripped of control and format
     characters (`\p{C}`, for example ESC, NUL and right-to-left override),
     shown in double quotes with embedded quotes escaped, and cut at 200
-    characters with the full length stated. The destructive tools show the raw
+    characters with the full length stated. A line item name or description
+    that was not given is shown as "not set" instead of `"undefined"`. The destructive tools show the raw
     value or refuse; see the Security entry above. A line item prompt shows
     every field it sends: quantity, name, description, unit price, unit cost,
     catalog product and taxable. All through `src/utils/prompt-text.ts`.
   - **Write failures:** only a 4xx response (including a 429) means Syncro
     rejected a write, and it is reported as a plain rejection. A write that
     ends any other way (network error, timeout, a 5xx or other non-4xx status,
-    or a 2xx whose body is not JSON) reports that it may or may not have been
+    or a 2xx whose body is not a JSON object) reports that it may or may not have been
     applied and that Syncro should be checked before retrying. This covers the
     REST-helper writes and the SDK-backed writes (`syncro_tickets_create`,
     `syncro_tickets_update`, `syncro_tickets_add_comment`,
@@ -230,10 +240,18 @@
   The SDK counts rate limit use per client, so reads and writes each count
   against their own budget. The SDK has no request timeout, and none was added
   to SDK-backed writes.
-- **A 2xx whose body is not JSON, on a REST-helper write, now carries the
-  unknown-outcome note.** It reported a plain "Expected JSON" error although
-  the write may have been applied. A write that gets a status other than a 2xx
-  or 4xx gets the note as well; a read never does.
+- **A 2xx whose body is not a JSON object, on a REST-helper write, now
+  carries the unknown-outcome note.** HTML, `null`, an array or a bare value
+  reported a plain "Expected JSON" error, or for `null` a TypeError in the
+  tool, although the write may have been applied: `syncro_time_log_entry` (a
+  retry would log the time twice), `syncro_time_set_billable` and
+  `syncro_assets_set_policy_folder` threw after the write. `syncroRest` now
+  rejects such a body once, for every caller. A write that gets a status other
+  than a 2xx or 4xx gets the note as well; a read never does.
+- **A line item prompt no longer shows `"undefined"`.** `syncro_tickets_add_line_item`
+  quoted a missing `description` or `name` as the text `"undefined"` while the
+  request left the field out. The prompt now says "not set" for a description
+  and "an item with no name" for a name.
 - **Time and line item arguments are validated more strictly.** `billable`
   (both time tools) must be a real boolean: the string `"false"` was shown in
   the prompt as billable and sent as text. `duration_minutes` and `quantity`
