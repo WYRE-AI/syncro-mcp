@@ -76,6 +76,10 @@
     If the client cannot elicit, ordinary writes proceed (the Conduit gateway
     applies its own confirm guard) and the destructive `syncro_assets_run_script`
     additionally requires `confirm: true`.
+  - **Write failures:** a write that times out, hits a network error or gets
+    a 5xx from Syncro reports that it may or may not have been applied and
+    that Syncro should be checked before retrying. A 4xx is reported as a
+    plain rejection.
   - See `docs/WYREAI-464-capability-diff.md` for the capability diff and the
     jobs deferred for lack of a Syncro API (backup status, KB-level patch
     approval, recurring script schedules).

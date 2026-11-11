@@ -107,6 +107,58 @@ describe("utils/rest.ts", () => {
       /timed out.*may or may not have been applied/
     );
   });
+
+  describe("write failures with an unknown outcome", () => {
+    const UNKNOWN = /may or may not have been applied; check Syncro before retrying/;
+
+    it.each(["POST", "PUT", "PATCH"] as const)(
+      "says so when a %s hits a network error",
+      async (method) => {
+        const cause = Object.assign(new Error("getaddrinfo"), { code: "ENOTFOUND" });
+        fetchMock.mockRejectedValue(new TypeError("fetch failed", { cause }));
+
+        const err = await syncroRest("/x", { method }).catch((e) => e);
+
+        expect(err).toBeInstanceOf(SyncroRestError);
+        expect(err.status).toBe(0);
+        expect(err.message).toContain("fetch failed (ENOTFOUND)");
+        expect(err.message).toMatch(UNKNOWN);
+        expect(err.message).not.toContain("secret-key");
+      }
+    );
+
+    it.each([500, 502, 503])("says so when a write gets a %i", async (status) => {
+      fetchMock.mockResolvedValue(new Response("upstream error", { status }));
+
+      const err = await syncroRest("/x", { method: "POST" }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(SyncroRestError);
+      expect(err.status).toBe(status);
+      expect(err.message).toContain(`failed (${status}): upstream error`);
+      expect(err.message).toMatch(UNKNOWN);
+    });
+
+    it.each([400, 404, 422, 429])(
+      "keeps a %i on a write as a plain rejection",
+      async (status) => {
+        fetchMock.mockResolvedValue(mockResponse(status, '{"error":"nope"}'));
+
+        const err = await syncroRest("/x", { method: "POST" }).catch((e) => e);
+
+        expect(err.status).toBe(status);
+        expect(err.message).toContain("nope");
+        expect(err.message).not.toMatch(UNKNOWN);
+      }
+    );
+
+    it("adds no note to a read that fails the same ways", async () => {
+      fetchMock.mockResolvedValueOnce(new Response("down", { status: 503 }));
+      await expect(syncroRest("/x")).rejects.not.toThrow(UNKNOWN);
+
+      fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+      await expect(syncroRest("/x")).rejects.not.toThrow(UNKNOWN);
+    });
+  });
 });
 
 describe("pathId", () => {

@@ -66,6 +66,23 @@ function describeErrorBody(body: unknown): string {
   return "no error detail returned";
 }
 
+/** Short reason for a fetch failure, with the system error code when present. */
+function describeNetworkError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const code = (err.cause as { code?: unknown } | undefined)?.code;
+  return typeof code === "string" ? `${err.message} (${code})` : err.message;
+}
+
+/**
+ * For a write whose result is unknown (timeout, network error, 5xx), say so:
+ * the request may have reached Syncro and been applied. Reads need no note.
+ */
+function withUnknownOutcome(message: string, method: RestMethod): string {
+  return method === "GET"
+    ? message
+    : `${message}. The change may or may not have been applied; check Syncro before retrying.`;
+}
+
 /**
  * Call the Syncro REST API with the current request's credentials.
  *
@@ -74,7 +91,9 @@ function describeErrorBody(body: unknown): string {
  * @param options HTTP method (default `GET`), query params and JSON body.
  * @returns The parsed JSON response, or `{}` when the body is empty.
  * @throws {SyncroRestError} On a non-2xx status, a non-JSON success body, or a
- *   timeout (status `0`). A timed-out write may still have been applied.
+ *   timeout or network error (status `0`). A write that timed out, hit a
+ *   network error or got a 5xx may still have been applied, and its message
+ *   says so; a 4xx is a plain rejection.
  */
 export async function syncroRest<T>(
   path: string,
@@ -108,18 +127,15 @@ export async function syncroRest<T>(
     // are not always JSON.
     raw = await response.text();
   } catch (err) {
-    if (err instanceof Error && err.name === "TimeoutError") {
-      const outcome =
-        method === "GET"
-          ? ""
-          : " The change may or may not have been applied; check Syncro before retrying.";
-      throw new SyncroRestError(
-        `Syncro API ${method} ${path} timed out after ${REST_TIMEOUT_MS / 1000}s.${outcome}`,
-        0,
-        undefined
-      );
-    }
-    throw err;
+    const reason =
+      err instanceof Error && err.name === "TimeoutError"
+        ? `timed out after ${REST_TIMEOUT_MS / 1000}s`
+        : `failed: ${describeNetworkError(err)}`;
+    throw new SyncroRestError(
+      withUnknownOutcome(`Syncro API ${method} ${path} ${reason}`, method),
+      0,
+      undefined
+    );
   }
   let parsed: unknown = raw;
   try {
@@ -135,8 +151,11 @@ export async function syncroRest<T>(
   }
 
   if (!response.ok) {
+    const message = `Syncro API ${method} ${path} failed (${response.status}): ${describeErrorBody(parsed)}`;
+    // A 4xx means Syncro rejected the request. A 5xx can come after the change
+    // was already applied, so a write that got one has an unknown outcome.
     throw new SyncroRestError(
-      `Syncro API ${method} ${path} failed (${response.status}): ${describeErrorBody(parsed)}`,
+      response.status >= 500 ? withUnknownOutcome(message, method) : message,
       response.status,
       parsed
     );
