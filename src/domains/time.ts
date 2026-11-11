@@ -16,6 +16,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { pathId, syncroRest } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
+import { clip } from "../utils/prompt-text.js";
 import {
   READ_ONLY,
   ADDITIVE_WRITE,
@@ -204,8 +205,16 @@ async function handleCall(
           : billable
             ? "billable"
             : "non-billable";
+      const technician =
+        args.user_id === undefined
+          ? "the API token owner"
+          : `user ${clip(args.user_id)}`;
+      const product =
+        args.product_id === undefined ? "none" : clip(args.product_id);
+      const notes =
+        args.notes === undefined ? "none" : `"${clip(args.notes)}"`;
       const blocked = await guardWrite(
-        `Log ${span} (${billing}) on Syncro ticket ${ticketId}?`
+        `Log ${span} (${billing}) on Syncro ticket ${ticketId} for ${technician}, labor product: ${product}, notes: ${notes}?`
       );
       if (blocked) return blocked;
 

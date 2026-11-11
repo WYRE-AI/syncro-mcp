@@ -9,6 +9,7 @@ import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
 import { pathId, syncroRest } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
+import { clip } from "../utils/prompt-text.js";
 import {
   READ_ONLY,
   IDEMPOTENT_WRITE,
@@ -364,8 +365,14 @@ async function handleCall(
       const assetId = pathId(args.asset_id, "asset_id");
       const scriptId = args.script_id as number;
       const runAt = args.run_at as string | undefined;
+      const runAs =
+        args.run_as === undefined
+          ? "the script's default account"
+          : clip(args.run_as);
+      const variables =
+        args.variables === undefined ? "none" : clip(args.variables);
       const blocked = await guardWrite(
-        `Run Syncro script ${scriptId} on asset ${assetId} ${runAt ? `at ${runAt}` : "now"}? This executes code on the device.`,
+        `Run Syncro script ${scriptId} on asset ${assetId} ${runAt ? `at ${runAt}` : "now"}, as ${runAs}, with variables: ${variables}? This executes code on the device.`,
         { destructive: true, args }
       );
       if (blocked) return blocked;

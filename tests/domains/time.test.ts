@@ -113,7 +113,7 @@ describe("domains/time.ts", () => {
       });
 
       expect(guard).toHaveBeenCalledWith(
-        "Log 30 minutes (billable) on Syncro ticket 5?"
+        'Log 30 minutes (billable) on Syncro ticket 5 for the API token owner, labor product: none, notes: "Reset MFA"?'
       );
       expect(rest).toHaveBeenNthCalledWith(1, "/tickets/5/timer_entry", {
         method: "POST",
@@ -131,6 +131,24 @@ describe("domains/time.ts", () => {
         body: { billable: true },
       });
       expect(JSON.parse(text(result)).time_entry.billable).toBe(true);
+    });
+
+    it("shows the technician, labor product and notes in the confirmation prompt", async () => {
+      rest.mockResolvedValueOnce({ id: 14, ticket_id: 5 });
+
+      await timeHandler.handleCall("syncro_time_log_entry", {
+        ticket_id: 5,
+        start_at: "2026-11-05T14:00:00Z",
+        duration_minutes: 45,
+        user_id: 8,
+        product_id: 99,
+        notes: "x".repeat(5000),
+      });
+
+      const [prompt] = guard.mock.calls[0];
+      expect(prompt).toContain("for user 8, labor product: 99, notes: ");
+      expect(prompt.length).toBeLessThan(500);
+      expect(prompt).toContain("characters in total");
     });
 
     it("skips the billable update when the account default already matches", async () => {

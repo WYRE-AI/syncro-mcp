@@ -388,7 +388,7 @@ describe("domains/assets.ts", () => {
         await assetsHandler.handleCall("syncro_assets_run_script", args);
 
         expect(guardModule.guardWrite).toHaveBeenCalledWith(
-          expect.stringContaining("Run Syncro script 7 on asset 42 now?"),
+          "Run Syncro script 7 on asset 42 now, as the script's default account, with variables: none? This executes code on the device.",
           { destructive: true, args }
         );
         expect(restModule.syncroRest).toHaveBeenCalledWith(
@@ -432,6 +432,38 @@ describe("domains/assets.ts", () => {
             },
           }
         );
+      });
+
+      it("shows run_as and the variables in the confirmation prompt", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+        await assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          run_at: "2026-11-07T02:00:00Z",
+          run_as: "system",
+          variables: { reboot: "false", target: "C:\\Temp" },
+        });
+
+        const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+        expect(prompt).toBe(
+          'Run Syncro script 7 on asset 42 at 2026-11-07T02:00:00Z, as system, with variables: {"reboot":"false","target":"C:\\\\Temp"}? This executes code on the device.'
+        );
+      });
+
+      it("caps long variables so the prompt stays readable", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+        await assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          variables: { payload: "x".repeat(5000) },
+        });
+
+        const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+        expect(prompt.length).toBeLessThan(500);
+        expect(prompt).toContain("characters in total");
+        expect(prompt).toContain("This executes code on the device.");
       });
 
       it("does not run when the guard blocks it", async () => {
