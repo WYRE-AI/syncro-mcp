@@ -86,7 +86,7 @@ describe("tool classification", () => {
     expect(destructive.length).toBeGreaterThan(0);
     for (const tool of destructive) {
       expect(tool.description).toMatch(/^⚠ /);
-      expect(tool.description).toContain("Confirm with the user before invoking.");
+      expect(tool.description).toContain("Confirm with the user before invoking");
     }
   });
 });

@@ -84,7 +84,10 @@ describe("Error Handling", () => {
       vi.mocked(clientModule.getClient).mockResolvedValue(mockClient as never);
 
       await expect(
-        invoicesHandler.handleCall("syncro_invoices_email", { invoice_id: 123 })
+        invoicesHandler.handleCall("syncro_invoices_email", {
+          invoice_id: 123,
+          confirm: true,
+        })
       ).rejects.toThrow("Invalid email address");
     });
   });
