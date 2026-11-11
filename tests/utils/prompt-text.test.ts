@@ -31,7 +31,7 @@ describe("quote", () => {
   });
 
   it.each([
-    ["ESC", "\u001b[2J"],
+    ["ESC", "\u001b"],
     ["NUL", "\u0000"],
     ["BEL", "\u0007"],
     ["DEL", "\u007f"],
@@ -41,11 +41,8 @@ describe("quote", () => {
     ["bidi isolate", "\u2066"],
     ["lone surrogate", "\ud800"],
   ])("strips %s", (_name, character) => {
-    const shown = quote(`before${character}after`);
-
-    expect(shown).not.toMatch(/\p{C}/u);
-    expect(shown.startsWith('"before')).toBe(true);
-    expect(shown.endsWith('after"')).toBe(true);
+    // Not even as a JSON escape such as \u001b: the character is gone.
+    expect(quote(`before${character}after`)).toBe('"before after"');
   });
 
   it("renders non-strings as JSON text", () => {
