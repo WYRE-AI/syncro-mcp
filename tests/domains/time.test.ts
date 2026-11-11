@@ -151,6 +151,29 @@ describe("domains/time.ts", () => {
       expect(prompt).toContain("(first 200 of 5000 characters)");
     });
 
+    it("sends the technician and the labor product the prompt names", async () => {
+      rest.mockResolvedValueOnce({ id: 14, ticket_id: 5 });
+
+      await timeHandler.handleCall("syncro_time_log_entry", {
+        ticket_id: 5,
+        start_at: "2026-11-05T14:00:00Z",
+        duration_minutes: 45,
+        user_id: 8,
+        product_id: 99,
+        notes: "Reset MFA",
+      });
+
+      const [, request] = rest.mock.calls[0];
+      expect(request?.body).toStrictEqual({
+        start_at: "2026-11-05T14:00:00Z",
+        end_at: undefined,
+        duration_minutes: 45,
+        notes: "Reset MFA",
+        product_id: 99,
+        user_id: 8,
+      });
+    });
+
     it("shows the end of the work window in the prompt", async () => {
       rest.mockResolvedValueOnce({ id: 15, ticket_id: 5 });
 

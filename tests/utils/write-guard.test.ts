@@ -3,6 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { confirmWrite } from "../../src/utils/elicitation.js";
 import { guardWrite } from "../../src/utils/write-guard.js";
 import * as serverRef from "../../src/utils/server-ref.js";
@@ -38,6 +40,48 @@ describe("confirmWrite", () => {
     } as never);
     await expect(confirmWrite("ok?")).resolves.toBe("unavailable");
     expect(elicitInput).not.toHaveBeenCalled();
+  });
+
+  it("prompts a client that declares elicitation as an empty object", async () => {
+    // MCP 2025-11-25: an empty `elicitation` capability means form mode only.
+    // The SDK applies that when it reads the initialize request, so the
+    // capabilities the server sees already say `form`. This runs a real
+    // server against a raw `initialize` to pin it.
+    const server = new Server({ name: "test", version: "1" }, { capabilities: {} });
+    const [client, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    await client.start();
+    const prompts: unknown[] = [];
+    const initialized = new Promise<void>((resolve) => {
+      client.onmessage = (message) => {
+        if ("method" in message && message.method === "elicitation/create") {
+          prompts.push(message.params);
+          void client.send({
+            jsonrpc: "2.0",
+            id: (message as { id: number }).id,
+            result: { action: "accept", content: { confirm: true } },
+          });
+        } else {
+          resolve();
+        }
+      };
+    });
+    await client.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-11-25",
+        capabilities: { elicitation: {} },
+        clientInfo: { name: "empty-elicitation-client", version: "1" },
+      },
+    });
+    await initialized;
+    vi.mocked(serverRef.getServerRef).mockReturnValue(server);
+
+    await expect(confirmWrite("ok?")).resolves.toBe("confirmed");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toMatchObject({ message: "ok?", mode: "form" });
   });
 
   it("propagates a failed prompt when the client supports forms", async () => {

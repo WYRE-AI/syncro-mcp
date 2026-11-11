@@ -602,6 +602,25 @@ describe("domains/assets.ts", () => {
         });
       });
 
+      it("sends run_as untouched: the value in the request is the value the prompt shows", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+        const runAs = " \tCORP\\admin\r\n ";
+
+        await assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          run_as: runAs,
+        });
+
+        const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+        const shown = /, as (".*"), with variables/.exec(prompt)?.[1];
+        expect(shown).toBe('" \\tCORP\\\\admin\\r\\n "');
+        const [, request] = vi.mocked(restModule.syncroRest).mock.calls[0];
+        const sent = (request?.body as { script_options: { run_as: string } }).script_options.run_as;
+        expect(sent).toBe(runAs);
+        expect(JSON.parse(shown!)).toBe(sent);
+      });
+
       it.each([
         ["run_as", { run_as: "system\u001b[2J" }, /run_as contains the character U\+001B/],
         ["run_as", { run_as: "sys\u2800tem" }, /run_as contains the character U\+2800/],
