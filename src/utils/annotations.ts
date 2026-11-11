@@ -1,7 +1,8 @@
 /**
  * MCP tool annotations used to classify every Syncro tool as read, write or
- * destructive. The Conduit gateway keys its confirm guard off these hints, so
- * every tool must carry exactly one of these presets.
+ * destructive, so every tool must carry exactly one of these presets. They are
+ * hints for MCP clients, not enforcement: on the gateway, who may call which
+ * tool is decided by the gateway's own per-tool tier policy.
  */
 
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";

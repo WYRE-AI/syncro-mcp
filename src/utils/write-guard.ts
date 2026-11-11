@@ -2,10 +2,17 @@
  * Shared confirm step for write tools.
  *
  * Writes ask the user through MCP elicitation. A decline or cancel always
- * stops the call. When the client cannot elicit, ordinary writes proceed
- * (the Conduit gateway applies its own confirm guard to write-classified
- * tools), but destructive tools additionally require the caller to pass
- * `confirm: true`, so a client without elicitation cannot run them blind.
+ * stops the call. When the client cannot elicit, ordinary writes proceed with
+ * no confirmation at all, and destructive tools require the caller to pass
+ * `confirm: true`.
+ *
+ * Elicitation is only available over stdio. The HTTP transport (the gateway
+ * and the Worker) builds a new server for every request, so it never sees the
+ * client's capabilities and always takes the "cannot elicit" path. There,
+ * `confirm: true` is a flag the calling model sets itself: a convention the
+ * model is asked to honour after asking the user, not an enforcement
+ * boundary. On the gateway the boundary is the gateway's per-tool tier
+ * policy (this server has no confirm step behind it).
  */
 
 import type { CallToolResult } from "./types.js";

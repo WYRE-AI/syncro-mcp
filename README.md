@@ -172,7 +172,17 @@ This reduces cognitive load and improves LLM tool selection accuracy.
 | `invoices` | View and manage billing | list, get, create, email |
 | `time` | Ticket time entries | list_entries, log_entry, set_billable |
 
-Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) that classify it as read, write, or destructive. Write tools added for the MSP job set (time, ticket line items, policy folders, scripts) ask for confirmation through MCP elicitation; a declined prompt cancels the call. `syncro_assets_run_script` is destructive: when the client cannot show a prompt it also requires `confirm: true`. See [`docs/WYREAI-464-capability-diff.md`](docs/WYREAI-464-capability-diff.md) for how this server and the official Syncro MCP split coverage.
+Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) that classify it as read, write, or destructive. The annotations are hints for MCP clients, not enforcement. See [`docs/WYREAI-464-capability-diff.md`](docs/WYREAI-464-capability-diff.md) for how this server and the official Syncro MCP split coverage.
+
+### Write confirmation
+
+How a write is confirmed depends on the transport.
+
+- **stdio, client supports elicitation:** the new write tools (`syncro_time_log_entry`, `syncro_time_set_billable`, `syncro_tickets_add_line_item`, `syncro_assets_set_policy_folder`, `syncro_assets_run_script`) and `syncro_invoices_email` ask the user through MCP elicitation. A declined or cancelled prompt stops the call, and a prompt that fails stops it too.
+- **stdio, client cannot elicit:** the ordinary writes proceed without a prompt. The two destructive tools, `syncro_assets_run_script` and `syncro_invoices_email`, require `confirm: true`.
+- **HTTP, including behind the gateway:** there is no prompt. The HTTP transport builds a new server for every request, so the server never learns whether the client can elicit. Ordinary writes proceed with no confirmation. `syncro_assets_run_script` and `syncro_invoices_email` require `confirm: true`, but the calling model supplies that flag itself, so it is a convention the model is asked to honour after asking the user, not an enforcement boundary. This server has no other confirmation step.
+
+On the gateway, the enforcement boundary is the gateway's per-tool tier policy (read, write, admin). Restrict `syncro_assets_run_script`, which runs code on a managed device, to the gateway's admin tier.
 
 ## Tools Reference
 
@@ -287,7 +297,7 @@ Update an existing ticket.
 ```
 
 #### syncro_tickets_add_comment
-Add a comment to a ticket.
+Add a comment to a ticket. Unless `hidden` is `true`, the comment is public: the customer can see it and Syncro emails it to them. Use `hidden: true` for an internal note, and `do_not_email: true` to stop the notification email. This tool does not set either flag for you.
 
 ```json
 {
@@ -298,7 +308,7 @@ Add a comment to a ticket.
 ```
 
 #### syncro_tickets_add_line_item
-Add a billable line item to a ticket (write, asks for confirmation).
+Add a billable line item to a ticket (write; see [Write confirmation](#write-confirmation)).
 
 ```json
 {
@@ -369,7 +379,7 @@ A customer's RMM policy folders.
 ```
 
 #### syncro_assets_set_policy_folder
-Move an asset into a policy folder, which changes its RMM and patch policy (write, asks for confirmation).
+Move an asset into a policy folder, which changes its RMM and patch policy (write; see [Write confirmation](#write-confirmation)).
 
 ```json
 {
@@ -379,7 +389,7 @@ Move an asset into a policy folder, which changes its RMM and patch policy (writ
 ```
 
 #### syncro_assets_run_script
-Run an existing Syncro RMM script once on an asset, now or at `run_at` (destructive, asks for confirmation).
+Run an existing Syncro RMM script once on an asset, now or at `run_at` (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). Restrict it to the gateway's admin tier.
 
 ```json
 {
@@ -455,12 +465,13 @@ Create a new invoice.
 ```
 
 #### syncro_invoices_email
-Email an invoice to the customer.
+Email an invoice to the customer (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)).
 
 ```json
 {
   "invoice_id": 456,
-  "subject": "Your Invoice"
+  "subject": "Your Invoice",
+  "confirm": true
 }
 ```
 
@@ -478,7 +489,7 @@ List ticket time entries. `billing_status: "unbilled"` finds billable work not y
 ```
 
 #### syncro_time_log_entry
-Log completed time on a ticket with a billable flag (write, asks for confirmation).
+Log completed time on a ticket with a billable flag (write; see [Write confirmation](#write-confirmation)).
 
 ```json
 {
@@ -491,7 +502,7 @@ Log completed time on a ticket with a billable flag (write, asks for confirmatio
 ```
 
 #### syncro_time_set_billable
-Mark an existing time entry billable or non-billable (write, asks for confirmation).
+Mark an existing time entry billable or non-billable (write; see [Write confirmation](#write-confirmation)).
 
 ```json
 {

@@ -165,7 +165,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_assets_run_script",
       description:
-        "⚠ DESTRUCTIVE — RUNS CODE ON A MANAGED DEVICE. Schedule an existing Syncro RMM script to run once on an asset, now or at a set time (e.g. a patch-install or remediation script). The script ID comes from the Syncro script library; the API has no endpoint to list scripts. Requires the 'Scripts - Execute' permission. Confirm with the user before invoking.",
+        "⚠ DESTRUCTIVE — RUNS CODE ON A MANAGED DEVICE. Schedule an existing Syncro RMM script to run once on an asset, now or at a set time (e.g. a patch-install or remediation script). The script ID comes from the Syncro script library; the API has no endpoint to list scripts. Requires the 'Scripts - Execute' permission. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve this exact run.",
       annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
@@ -187,7 +187,7 @@ function getTools(): Tool[] {
           confirm: {
             type: "boolean",
             description:
-              "Set true only after the user approved this run. Required when the client cannot show a confirmation prompt",
+              "Set true only after the user approved this run. Required when the client cannot show a confirmation prompt (always the case over HTTP). This server cannot verify that the user approved",
           },
         },
         required: ["asset_id", "script_id"],

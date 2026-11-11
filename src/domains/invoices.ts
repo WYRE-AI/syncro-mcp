@@ -102,7 +102,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_invoices_email",
       description:
-        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. Confirm with the user before invoking.",
+        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve.",
       annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
@@ -126,7 +126,7 @@ function getTools(): Tool[] {
           confirm: {
             type: "boolean",
             description:
-              "Set true only after the user approved sending this email. Required when the client cannot show a confirmation prompt (always the case over HTTP)",
+              "Set true only after the user approved sending this email. Required when the client cannot show a confirmation prompt (always the case over HTTP). This server cannot verify that the user approved",
           },
         },
         required: ["invoice_id"],

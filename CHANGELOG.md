@@ -80,12 +80,18 @@
     `syncro_assets_list_installed_applications`,
     `syncro_assets_list_policy_folders`, `syncro_assets_set_policy_folder`
     and `syncro_assets_run_script`.
-  - **Write confirmation:** every new write asks the user through MCP
-    elicitation first, and a decline or cancel always stops the call. If the
-    client supports elicitation but the prompt fails, the write fails closed.
-    If the client cannot elicit, ordinary writes proceed (the Conduit gateway
-    applies its own confirm guard) and the destructive `syncro_assets_run_script`
-    additionally requires `confirm: true`.
+  - **Write confirmation:** over stdio with an elicitation-capable client,
+    every new write asks the user through MCP elicitation first. A decline or
+    cancel always stops the call, and a prompt that fails stops it too. Over
+    HTTP, including behind the gateway, there is no prompt: the server is
+    created per request and never learns the client's capabilities. Ordinary
+    writes proceed with no confirmation, and the destructive
+    `syncro_assets_run_script` requires `confirm: true`. That flag is supplied
+    by the calling model, so it is a convention the model is asked to honour,
+    not an enforcement boundary. On the gateway the boundary is the gateway's
+    per-tool tier policy; restrict `syncro_assets_run_script` to the admin
+    tier. Prompts show the script's `run_as` and variables and the time
+    entry's technician, labor product and notes, each cut at 200 characters.
   - **Write failures:** a write that times out, hits a network error or gets
     a 5xx from Syncro reports that it may or may not have been applied and
     that Syncro should be checked before retrying. A 4xx is reported as a
@@ -100,14 +106,15 @@
   - **Fix:** the client cache now lives in an `AsyncLocalStorage`-scoped box instead of module variables (`runWithClientScope` for per-request transports — Node HTTP, Workers — and `bindClientScope` for the single-session stdio transport), mirroring `server-ref.ts`. Credential resolution, error messages, and the mismatch-detect-and-recreate behavior are unchanged — only where the mutable state lives has changed. Call sites updated: `src/index.ts` (Node HTTP `handleMcp` wraps the connect/handleRequest chain in `runWithClientScope`; stdio calls `bindClientScope` once at startup), `src/worker.ts` (Cloudflare Workers `handleMcp` wraps the connect/handleRequest chain in `runWithClientScope`). `getClient()` / `getCredentials()` / `clearClient()` keep their existing signatures and behavior, so no domain handler call sites changed.
   - **Regression test:** `tests/utils/client.test.ts` runs two concurrent "tenants" (distinct credential sets) through `runWithClientScope`, each with an `await` gap between validating credentials and re-using the client, and asserts each tenant's client is cached correctly within its own scope, is built from its own credentials, and is never the same instance as the other tenant's.
 
-- **Published to GitHub Packages.** Enabled npm publishing for the already-scoped `@wyre-technology/syncro-mcp` package: `@semantic-release/npm` `npmPublish` is now `true` and `publishConfig.registry` points at `npm.pkg.github.com`. The release workflow already configured an authenticated `.npmrc` and `packages: write`. Updated the README, which previously stated there was no npm package. The GHCR image name and `io.github.wyre-technology/syncro-mcp` MCP Registry identifier are unchanged.
+- **GitHub Packages publishing was set up, then turned off.** `publishConfig.registry` points at `npm.pkg.github.com`, but `.releaserc.json` sets `npmPublish: false` (commit 7416b03), so releases do not publish an npm package; the GHCR image and the `io.github.wyre-technology/syncro-mcp` MCP Registry identifier are what ships.
 
 - **Every tool now carries MCP classification annotations.** All sidecar tools,
   including the existing customer, contact, ticket, asset and invoice tools,
   declare `readOnlyHint` / `destructiveHint` / `idempotentHint` presets
-  (`src/utils/annotations.ts`) so the Conduit gateway can classify each as
-  read, write or destructive. `tests/classification.test.ts` fails if a tool is
-  unclassified or changes class. `syncro_invoices_email` is classified
+  (`src/utils/annotations.ts`) so clients can classify each as read, write or
+  destructive. The annotations are hints, not enforcement.
+  `tests/classification.test.ts` fails if a tool is unclassified or changes
+  class. `syncro_invoices_email` is classified
   destructive, and its description now warns that sending cannot be undone.
 
 - **`syncro_tickets_add_comment` now says that a public comment is emailed to
