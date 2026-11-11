@@ -18,7 +18,7 @@ import {
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getDomainHandler, getAvailableDomains } from "./domains/index.js";
 import { isDomainName, type DomainName } from "./utils/types.js";
-import { getCredentials } from "./utils/client.js";
+import { getCredentials, isValidSubdomain } from "./utils/client.js";
 import { registerResourceHandlers } from "./resources.js";
 import { READ_ONLY } from "./utils/annotations.js";
 import type { RequestCredentials } from "./utils/credential-store.js";
@@ -85,6 +85,24 @@ const statusTool: Tool = {
     properties: {},
   },
 };
+
+/**
+ * Credentials line for the status tool. The subdomain is printed only when
+ * the client would accept it, so a bad value is never echoed back.
+ */
+function describeCredentials(): string {
+  const creds = getCredentials();
+  if (!creds) {
+    return "NOT CONFIGURED - Please set SYNCRO_API_KEY environment variable";
+  }
+  if (!creds.subdomain) {
+    return "API key set, but no subdomain is configured. Tools will fail until SYNCRO_SUBDOMAIN is set";
+  }
+  if (!isValidSubdomain(creds.subdomain)) {
+    return 'API key set, but the configured subdomain is invalid: it must be a single label such as "acme". Tools will fail until it is fixed';
+  }
+  return `Configured (subdomain: ${creds.subdomain})`;
+}
 
 /**
  * Map from domain name to its tool definitions (loaded lazily)
@@ -242,10 +260,7 @@ export function createMcpServer(): Server {
       }
 
       if (name === "syncro_status") {
-        const creds = getCredentials();
-        const credStatus = creds
-          ? `Configured${creds.subdomain ? ` (subdomain: ${creds.subdomain})` : ""}`
-          : "NOT CONFIGURED - Please set SYNCRO_API_KEY environment variable";
+        const credStatus = describeCredentials();
 
         return {
           content: [

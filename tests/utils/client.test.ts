@@ -7,6 +7,7 @@ import {
   getCredentials,
   getClient,
   clearClient,
+  isValidSubdomain,
   runWithClientScope,
 } from "../../src/utils/client.js";
 import { credentialStore } from "../../src/utils/credential-store.js";
@@ -322,6 +323,25 @@ describe("client.ts", () => {
         apiKey: "tenant-b-key",
         subdomain: "tenant-b",
       });
+    });
+  });
+
+  describe("isValidSubdomain", () => {
+    it.each(["acme", "my-company", "A1", "a".repeat(63)])("accepts %s", (value) => {
+      expect(isValidSubdomain(value)).toBe(true);
+    });
+
+    it.each([
+      "",
+      "evil.example",
+      "evil.example/x#",
+      "-acme",
+      "acme-",
+      "a".repeat(64),
+      "acme\n",
+      "${user_config.syncro_subdomain}",
+    ])("rejects %j", (value) => {
+      expect(isValidSubdomain(value)).toBe(false);
     });
   });
 

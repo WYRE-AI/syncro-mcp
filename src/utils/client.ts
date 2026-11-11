@@ -37,6 +37,11 @@ import { cleanCredential } from "./clean-credential.js";
 /** One DNS label: letters, digits and inner hyphens, at most 63 characters. */
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
 
+/** Whether a configured subdomain is one the client accepts as a host label. */
+export function isValidSubdomain(subdomain: string): boolean {
+  return DNS_LABEL.test(subdomain);
+}
+
 export interface SyncroCredentials {
   apiKey: string;
   subdomain?: string;
@@ -159,7 +164,7 @@ export async function getClient(): Promise<SyncroClient> {
   // value such as "evil.example/x#" would send the API key to another host.
   // Both the SDK client and the REST helper get their host from this client,
   // so this is the one place that has to check it. The value is not echoed.
-  if (!DNS_LABEL.test(creds.subdomain)) {
+  if (!isValidSubdomain(creds.subdomain)) {
     throw new Error(
       "SYNCRO_SUBDOMAIN must be a single subdomain label of letters, digits " +
         'and hyphens (e.g. "acme" for acme.syncromsp.com), not a host name or URL.'
