@@ -90,12 +90,44 @@
     by the calling model, so it is a convention the model is asked to honour,
     not an enforcement boundary. On the gateway the boundary is the gateway's
     per-tool tier policy; restrict `syncro_assets_run_script` to the admin
-    tier. Prompts show the script's `run_as` and variables and the time
-    entry's technician, labor product and notes, each cut at 200 characters.
-  - **Write failures:** a write that times out, hits a network error or gets
-    a 5xx from Syncro reports that it may or may not have been applied and
-    that Syncro should be checked before retrying. A 4xx is reported as a
-    plain rejection.
+    tier.
+  - **Prompt contents:** a prompt shows what the call will send. Free text
+    from the caller (notes, a line item name, `run_as`, script variables, an
+    email's cc, subject and message) is reduced to one line, stripped of
+    control and format characters (`\p{C}`, for example ESC, NUL and
+    right-to-left override) and shown in double quotes with embedded quotes
+    escaped, through one helper, `src/utils/prompt-text.ts`. Time entry notes
+    and a line item name show their first 200 characters and state the full
+    length. The destructive tools show everything or refuse: see "Stricter
+    argument validation" below.
+  - **Write failures:** a write that hits a network error or gets a 5xx from
+    Syncro reports that it may or may not have been applied and that Syncro
+    should be checked before retrying; so does a write through the REST
+    helper that times out (30s). A 4xx is reported as a plain rejection. This
+    covers the REST-helper writes and the SDK-backed writes
+    (`syncro_tickets_create`, `syncro_tickets_update`,
+    `syncro_tickets_add_comment`, `syncro_customers_create`,
+    `syncro_contacts_create`, `syncro_invoices_create` and
+    `syncro_invoices_email`), through one wrapper, `sdkWrite` in
+    `src/utils/write-outcome.ts`. The SDK sets no timeout of its own. The REST
+    helper never retries, but the SDK may retry a POST after a 5xx or a 429,
+    so an SDK-backed write can be sent more than once. An error body that ends
+    in a full stop no longer produces `..` before that sentence.
+  - **Stricter argument validation:** these checks run before a prompt is
+    built or a request is sent, and a failure is returned as an error with no
+    outbound call. `asset_id`, `script_id`, `policy_folder_id`, `ticket_id`,
+    `timer_id` and `invoice_id` (and `user_id` and `product_id` on
+    `syncro_time_log_entry`) must be positive integers; `script_id` and
+    `invoice_id` were previously passed through unchecked. `duration_minutes`,
+    `quantity` and `price_retail` must be finite numbers. `run_at`,
+    `start_at` and `end_at` must be ISO 8601 date-times
+    (`2026-11-07T02:00:00Z`, with an optional offset); a date-only value is
+    rejected. `syncro_assets_run_script` lists every variable name and value in
+    its prompt and refuses the call if `run_as` or a variable name or value is
+    over 200 characters, or the variables together are over 1000 characters
+    when listed. `syncro_invoices_email` shows cc, subject and message and
+    refuses the call if cc or subject is over 200 characters or the message is
+    over 1000. Lengths are measured on the text as shown.
   - See `docs/WYREAI-464-capability-diff.md` for the capability diff and the
     jobs deferred for lack of a Syncro API (backup status, KB-level patch
     approval, recurring script schedules).
@@ -121,6 +153,17 @@
   the customer.** The tool and argument descriptions explain `hidden` (internal
   note) and `do_not_email`. Behaviour and defaults are unchanged.
 
+- **`syncro_tickets_create` now says that `comment_body` may be visible to the
+  customer.** The tool and argument descriptions warn that the initial comment
+  may be emailed to the customer and cannot be marked hidden here, and point
+  to `syncro_tickets_add_comment` with `hidden: true` for an internal note.
+  Behaviour is unchanged.
+
+- **`syncro_assets_set_policy_folder` now says that a policy folder can apply
+  policies and scripts.** The description adds that moving a device into a
+  policy folder can apply that folder's policies and scripts to it. Its
+  classification and guard are unchanged.
+
 - **`syncro_invoices_email` now goes through the destructive write guard.**
   It previously called Syncro directly even though it is annotated
   destructive. It now asks the user through MCP elicitation when the client
@@ -128,11 +171,19 @@
   returns "Confirmation required" unless the call passes `confirm: true`; a
   new optional `confirm` argument was added for that. Callers that used to
   email an invoice without `confirm` over HTTP or stdio without elicitation
-  must now pass it. See "Write confirmation" above for what `confirm` does
-  and does not enforce.
+  must now pass it. The prompt (and the "Confirmation required" message)
+  shows cc, subject and the message body. `invoice_id` must be a positive
+  integer. See "Write confirmation" above for what `confirm` does and does not
+  enforce.
 
 ### Fixed
 
+- **`syncro_status` no longer echoes a subdomain the client rejects.** It
+  printed the raw configured subdomain and said "Configured" for a value that
+  every other tool refuses. It now prints the subdomain only when it passes the
+  same check as `getClient()` (`isValidSubdomain` in `src/utils/client.ts`);
+  otherwise it reports the subdomain as invalid without repeating it, and a
+  missing subdomain is reported as missing instead of "Configured".
 - **`syncro_status` and the unknown-tool error advised calling
   `syncro_navigate` to discover tools without qualification.** Conduit
   suppresses `*_navigate` / `*_back` at the gateway (tier filtering lives in

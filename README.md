@@ -184,6 +184,20 @@ How a write is confirmed depends on the transport.
 
 On the gateway, the enforcement boundary is the gateway's per-tool tier policy (read, write, admin). Restrict `syncro_assets_run_script`, which runs code on a managed device, to the gateway's admin tier.
 
+**What a prompt shows.** The same text is returned in the "Confirmation required" message when `confirm: true` is needed.
+
+- The ids, numbers and timestamps that a confirmed write shows in a prompt or puts in a request path are validated first: `asset_id`, `script_id`, `policy_folder_id`, `ticket_id`, `timer_id` and `invoice_id` (and `user_id` and `product_id` on a time entry) must be positive integers, `duration_minutes`, `quantity` and `price_retail` must be finite numbers, and `run_at`, `start_at` and `end_at` must be ISO 8601 date-times such as `2026-11-07T02:00:00Z`. Anything else is rejected with an error before a prompt is built or a request is sent.
+- Free text from the caller (notes, line item name, `run_as`, variables, email cc, subject and message) is reduced to one line, stripped of control and format characters, and shown in double quotes with embedded quotes escaped, so it cannot read as part of the prompt.
+- Where a long value cannot change what the call does (time entry notes, a line item name) the prompt shows the first 200 characters and states the full length.
+- The two destructive tools show everything they send or refuse. `syncro_assets_run_script` lists every variable name and value. The call is refused, with no prompt and no request, if `run_as` or a variable name or value is over 200 characters, or the listed variables together are over 1000. `syncro_invoices_email` shows cc, subject and message in full, and is refused if cc or subject is over 200 characters or the message is over 1000.
+- Lengths are measured on the text as shown, after whitespace is collapsed and control characters are removed.
+
+### Write failures
+
+A write that fails with a network error or a 5xx from Syncro may still have been applied, and its error says "The change may or may not have been applied; check Syncro before retrying." So does a write that times out. A 4xx is a plain rejection. This holds for every write: the writes made through the REST helper (`syncro_time_log_entry`, `syncro_time_set_billable`, `syncro_tickets_add_line_item`, `syncro_assets_set_policy_folder`, `syncro_assets_run_script`) and the SDK-backed writes (`syncro_tickets_create`, `syncro_tickets_update`, `syncro_tickets_add_comment`, `syncro_customers_create`, `syncro_contacts_create`, `syncro_invoices_create`, `syncro_invoices_email`). Only the REST helper sets a timeout (30 seconds per call); the SDK sets none.
+
+The REST helper never retries. The SDK may retry a POST after a 5xx or a 429, so an SDK-backed create, comment or email can be sent more than once before it fails or succeeds.
+
 ## Tools Reference
 
 ### Navigation Tools
@@ -274,7 +288,7 @@ Get a specific ticket by ID.
 ```
 
 #### syncro_tickets_create
-Create a new ticket.
+Create a new ticket. `comment_body` creates an initial comment that may be visible to the customer, and Syncro may email it to them. This tool cannot mark that comment hidden; to leave an internal note, omit `comment_body` and call `syncro_tickets_add_comment` with `hidden: true`.
 
 ```json
 {
@@ -379,7 +393,7 @@ A customer's RMM policy folders.
 ```
 
 #### syncro_assets_set_policy_folder
-Move an asset into a policy folder, which changes its RMM and patch policy (write; see [Write confirmation](#write-confirmation)).
+Move an asset into a policy folder, which changes its RMM and patch policy. Moving a device into a policy folder can apply that folder's policies and scripts to it (write; see [Write confirmation](#write-confirmation)).
 
 ```json
 {
@@ -389,7 +403,7 @@ Move an asset into a policy folder, which changes its RMM and patch policy (writ
 ```
 
 #### syncro_assets_run_script
-Run an existing Syncro RMM script once on an asset, now or at `run_at` (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). Restrict it to the gateway's admin tier.
+Run an existing Syncro RMM script once on an asset, now or at `run_at` (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). `script_id` must be a positive integer and `run_at` an ISO 8601 date-time. The prompt lists every variable in full, so the call is refused if `run_as` or a variable name or value is over 200 characters, or the variables together are over 1000 when listed. Restrict it to the gateway's admin tier.
 
 ```json
 {
@@ -465,7 +479,7 @@ Create a new invoice.
 ```
 
 #### syncro_invoices_email
-Email an invoice to the customer (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)).
+Email an invoice to the customer (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). The prompt shows `cc_emails`, `subject` and `message` in full, so the call is refused if `cc_emails` or `subject` is over 200 characters or `message` is over 1000.
 
 ```json
 {
