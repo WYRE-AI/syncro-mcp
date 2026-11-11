@@ -197,12 +197,11 @@ On the gateway, the enforcement boundary is the gateway's per-tool tier policy (
 
 - **Ids.** Every id that any tool puts in a request path, SDK-backed or not, is checked first: `ticket_id`, `customer_id`, `contact_id`, `asset_id`, `invoice_id`, `script_id`, `policy_folder_id` and `timer_id`, and the id of a time entry that Syncro returns, must be positive integers. Anything else is rejected with an error before a prompt is built or a request is sent. An id that is only a query filter or a JSON body field (for example `customer_id` on `syncro_tickets_list`) cannot change the endpoint and is passed through as given.
 - **Other values.** `user_id` and `product_id` must be positive integers, `duration_minutes` a positive whole number (Syncro's schema is an integer), `quantity` a number above 0, `price_retail` and `price_cost` finite numbers, `billable` and `taxable` true or false (a string such as `"false"` is rejected), and `run_at`, `start_at` and `end_at` real ISO 8601 date-times with `Z` or an offset, such as `2026-11-07T02:00:00Z`. A date without an offset is rejected because its time zone would be ambiguous.
-- **Free text that does not change what the call does** (time entry notes, a line item name and description) is reduced to one line, stripped of control and format characters, shown in double quotes with embedded quotes escaped, and cut at 200 characters with the full length stated. A line item name or description that was not given is shown as "not set" (the request omits it).
-- **The two destructive tools show exactly what they send, or refuse.** For `run_as` and every script variable name and value on `syncro_assets_run_script`, and for `cc_emails`, `subject` and `message` on `syncro_invoices_email`, the call is refused, with no prompt and no request, if the value is not a string; contains a control character other than newline, carriage return and tab (so CRLF line endings are accepted, and a lone `\r` too); a format character (zero-width, direction-changing), a private-use, unassigned or surrogate code point; any space or separator other than the plain space (no-break and other wide or narrow spaces, line and paragraph separators); or a character that draws nothing (variation selectors, for example U+FE0F; Hangul and Khmer fillers; U+034F; U+2800); or is too long. The limit is 200 characters (1000 for an email `message`, and 1000 for the script variables together as listed), counted on the raw value, so a run of newlines counts and a CRLF is two characters. The prompt shows the raw value as a JSON string: a newline appears as `\n`, a carriage return as `\r`, a tab as `\t` and a quote as `\"`.
+- **Every free-text value that is sent is shown exactly as sent, or the call is refused.** This covers `notes` on `syncro_time_log_entry`, `name` and `description` on `syncro_tickets_add_line_item`, `run_as` and every script variable name and value on `syncro_assets_run_script`, and `cc_emails`, `subject` and `message` on `syncro_invoices_email`. What you approve is what is sent: nothing is trimmed, cut or cleaned between the prompt and the request. The call is refused, with no prompt and no request, if the value is not a string; contains a control character other than newline, carriage return and tab (so CRLF line endings are accepted, and a lone `\r` too); a format character (zero-width, direction-changing), a private-use, unassigned or surrogate code point; any space or separator other than the plain space (no-break and other wide or narrow spaces, line and paragraph separators); or a character that draws nothing (variation selectors, for example U+FE0F; Hangul and Khmer fillers; U+034F; U+2800); or is too long. The limit is 200 characters (1000 for time entry `notes`, a line item `description`, an email `message`, and for the script variables together as listed), counted on the raw value, so a run of newlines counts and a CRLF is two characters. The prompt shows the raw value as a JSON string: a newline appears as `\n`, a carriage return as `\r`, a tab as `\t` and a quote as `\"`. A line item name or description that was not given is shown as "not set" (the request omits it).
 
 ### Write failures
 
-Only a 4xx response (including a 429) means Syncro rejected a write, and it is reported as a plain rejection. A write that ends any other way may still have been applied: a network error, a timeout, a 5xx or other non-4xx status, or a 2xx whose body is not a JSON object (HTML, `null`, an array). Its error says "The change may or may not have been applied; check Syncro before retrying." This holds for every write: the writes made through the REST helper (`syncro_time_log_entry`, `syncro_time_set_billable`, `syncro_tickets_add_line_item`, `syncro_assets_set_policy_folder`, `syncro_assets_run_script`) and the SDK-backed writes (`syncro_tickets_create`, `syncro_tickets_update`, `syncro_tickets_add_comment`, `syncro_customers_create`, `syncro_contacts_create`, `syncro_invoices_create`, `syncro_invoices_email`). Reads never carry the note.
+Only a 4xx response (including a 429) means Syncro rejected a write, and it is reported as a plain rejection. A write that ends any other way may still have been applied: a network error, a timeout, or a 5xx or other non-4xx status. Its error says "The change may or may not have been applied; check Syncro before retrying." This holds for the writes made through the REST helper (`syncro_time_log_entry`, `syncro_time_set_billable`, `syncro_tickets_add_line_item`, `syncro_assets_set_policy_folder`, `syncro_assets_run_script`) and for the SDK-backed writes (`syncro_tickets_create`, `syncro_tickets_update`, `syncro_tickets_add_comment`, `syncro_customers_create`, `syncro_contacts_create`, `syncro_invoices_create`, `syncro_invoices_email`). One more case holds for the REST helper only: a 2xx whose body is not a JSON object (HTML, `null`, an array) is reported as an error with the same note. An SDK-backed write that gets a 2xx with an array or a bare value is returned to the caller as a success, without the note; this server does not check the shape of an SDK response. Reads never carry the note.
 
 Every write is sent exactly once. The REST helper never retries, and SDK-backed writes use a client with retries turned off, so a create, comment or email is not repeated after a 5xx or 429. Reads keep the SDK's retries. Only the REST helper sets a timeout (30 seconds per call); the SDK has no timeout and this server does not add one, so an SDK-backed write that never receives a response does not end on its own.
 
@@ -330,7 +329,7 @@ Add a comment to a ticket. Unless `hidden` is `true`, the comment is public: the
 ```
 
 #### syncro_tickets_add_line_item
-Add a billable line item to a ticket (write; see [Write confirmation](#write-confirmation)).
+Add a billable line item to a ticket (write; see [Write confirmation](#write-confirmation)). The prompt shows `name` and `description` exactly as sent, so the call is refused if one is not a string, contains a character the prompt cannot show, or is over its limit (200 characters for `name`, 1000 for `description`).
 
 ```json
 {
@@ -411,7 +410,7 @@ Move an asset into a policy folder, which changes its RMM and patch policy. Movi
 ```
 
 #### syncro_assets_run_script
-Run an existing Syncro RMM script once on an asset, now or at `run_at` (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). `script_id` must be a positive integer and `run_at` an ISO 8601 date-time with `Z` or an offset. The prompt shows `run_as` and every variable exactly as sent, so the call is refused if `run_as` or a variable name or value is not a string, contains a character the prompt cannot show, or is over 200 characters, or if the variables together are over 1000 when listed. Restrict it to the gateway's admin tier.
+Run an existing Syncro RMM script once on an asset, now or at `run_at` (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). `script_id` must be a positive integer and `run_at` an ISO 8601 date-time with `Z` or an offset. The prompt shows `run_as` and every variable exactly as sent, so the call is refused if `run_as` or a variable name or value is not a string, contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space), or is over 200 characters, or if the variables together are over 1000 when listed. Restrict it to the gateway's admin tier.
 
 ```json
 {
@@ -487,7 +486,7 @@ Create a new invoice.
 ```
 
 #### syncro_invoices_email
-Email an invoice to the customer (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). The prompt shows `cc_emails`, `subject` and `message` exactly as sent, so the call is refused if one is not a string, contains a character the prompt cannot show, or is over its limit (200 characters for `cc_emails` and `subject`, 1000 for `message`).
+Email an invoice to the customer (destructive; requires `confirm: true` without a prompt, see [Write confirmation](#write-confirmation)). The prompt shows `cc_emails`, `subject` and `message` exactly as sent, so the call is refused if one is not a string, contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space), or is over its limit (200 characters for `cc_emails` and `subject`, 1000 for `message`).
 
 ```json
 {
@@ -511,7 +510,7 @@ List ticket time entries. `billing_status: "unbilled"` finds billable work not y
 ```
 
 #### syncro_time_log_entry
-Log completed time on a ticket with a billable flag (write; see [Write confirmation](#write-confirmation)).
+Log completed time on a ticket with a billable flag (write; see [Write confirmation](#write-confirmation)). The prompt shows `notes` exactly as sent, so the call is refused if it is not a string, contains a character the prompt cannot show, or is over 1000 characters.
 
 ```json
 {

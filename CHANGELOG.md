@@ -18,6 +18,22 @@
   `set_policy_folder` `asset_id` and `policy_folder_id`, `run_script`
   `asset_id`).
 
+- **Time entry notes and line item name and description are shown in full,
+  or refused.** They were shown cut to 200 characters on one line while the
+  request sent them whole. Every free-text value that is sent to Syncro now goes
+  through `quoteInFull`, so what is approved is exactly what is sent:
+  `syncro_time_log_entry` `notes` and `syncro_tickets_add_line_item`
+  `description` (up to 1000 characters, the bound the invoice email `message`
+  already had, now `MAX_LONG_TEXT_PROMPT` in `src/utils/prompt-text.ts`) and
+  `name` (up to 200). A value that is not a string, is over its limit or
+  contains a character the prompt cannot show is refused before the prompt and
+  before any request. `quote`, which cleans and cuts, is left only for values
+  that are not sent as they are, such as a name inside an error message.
+  Table-driven tests now pin that the sent value equals the shown value for
+  time `notes`, line item `name` and `description`, every script runtime
+  variable, and invoice `cc_emails`, `subject` and `message`; trimming or cutting
+  any of them between the prompt and the request fails a test.
+
 - **A destructive prompt now shows exactly what is sent, or the call is
   refused.** `syncro_assets_run_script` (`run_as`, variable names and values)
   and `syncro_invoices_email` (`cc_emails`, `subject`, `message`) used to
@@ -139,21 +155,20 @@
     per-tool tier policy; restrict `syncro_assets_run_script` to the admin
     tier.
   - **Prompt contents:** a prompt shows what the call will send. Free text
-    that cannot change what the call does (time entry notes, a line item name
-    and description) is reduced to one line, stripped of control and format
-    characters (`\p{C}`, for example ESC, NUL and right-to-left override),
-    shown in double quotes with embedded quotes escaped, and cut at 200
-    characters with the full length stated. A line item name or description
-    that was not given is shown as "not set" instead of `"undefined"`. The destructive tools show the raw
-    value or refuse; see the Security entry above. A line item prompt shows
+    that is sent (time entry notes, a line item name and description, and
+    the destructive tools' values) is shown as the raw JSON string or the
+    call is refused; see the Security entries above. A line item name or
+    description that was not given is shown as "not set" instead of
+    `"undefined"`. A line item prompt shows
     every field it sends: quantity, name, description, unit price, unit cost,
     catalog product and taxable. All through `src/utils/prompt-text.ts`.
   - **Write failures:** only a 4xx response (including a 429) means Syncro
     rejected a write, and it is reported as a plain rejection. A write that
-    ends any other way (network error, timeout, a 5xx or other non-4xx status,
-    or a 2xx whose body is not a JSON object) reports that it may or may not have been
-    applied and that Syncro should be checked before retrying. This covers the
-    REST-helper writes and the SDK-backed writes (`syncro_tickets_create`,
+    ends any other way (network error, timeout, or a 5xx or other non-4xx
+    status; for a REST-helper write also a 2xx whose body is not a JSON object)
+    reports that it may or may not have been applied and that Syncro should be
+    checked before retrying. This covers the REST-helper writes and the
+    SDK-backed writes (`syncro_tickets_create`,
     `syncro_tickets_update`, `syncro_tickets_add_comment`,
     `syncro_customers_create`, `syncro_contacts_create`,
     `syncro_invoices_create` and `syncro_invoices_email`), through
@@ -161,7 +176,9 @@
     Every write is sent once; see "Writes are sent once" under Fixed. The REST
     helper sets a 30s timeout; the SDK sets none and this server does not add
     one. An error body that ends in a full stop no longer produces `..` before
-    that sentence.
+    that sentence. An SDK-backed write that gets a 2xx with an array or a bare
+    value is returned as a success without the note: `sdkWrite` does not check
+    the shape of an SDK response.
   - **Stricter argument validation:** these checks run before a prompt is
     built or a request is sent, and a failure is returned as an error with no
     outbound call. `asset_id`, `script_id`, `policy_folder_id`, `ticket_id`,
@@ -178,7 +195,9 @@
     call if `run_as` or a variable name or value is over 200 characters, or the
     variables together are over 1000 characters when listed, and
     `syncro_invoices_email` refuses it if cc or subject is over 200 characters
-    or the message is over 1000; see the Security entry above for what else is
+    or the message is over 1000, and `syncro_time_log_entry` and
+    `syncro_tickets_add_line_item` refuse `notes` or `description` over 1000
+    characters and `name` over 200; see the Security entries above for what else is
     refused.
   - See `docs/WYREAI-464-capability-diff.md` for the capability diff and the
     jobs deferred for lack of a Syncro API (backup status, KB-level patch
