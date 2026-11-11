@@ -135,6 +135,20 @@ function resolveHttpS2s(configuredHost: string): { secret: string; host: string 
 }
 
 /**
+ * Parse a request target such as `/mcp?x=1`, or null when it is malformed.
+ * The base is fixed because only the path is used: the Host header is chosen
+ * by the client, can be malformed, and must not decide whether a request is
+ * answered.
+ */
+function parseRequestTarget(target: string | undefined): URL | null {
+  try {
+    return new URL(target || "/", "http://localhost");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Extract gateway credentials from HTTP request headers.
  * Returns the credentials object if present, or null if the required API key is missing.
  * Blank and whitespace-only values count as missing so they cannot fall through.
@@ -159,10 +173,12 @@ export async function startHttpTransport(): Promise<HttpServer> {
   const isGatewayMode = process.env.AUTH_MODE === "gateway";
 
   const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(
-      req.url || "/",
-      `http://${req.headers.host || "localhost"}`
-    );
+    const url = parseRequestTarget(req.url);
+    if (!url) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Malformed request target" }));
+      return;
+    }
 
     // Health endpoint - no auth required
     if (url.pathname === "/health") {
