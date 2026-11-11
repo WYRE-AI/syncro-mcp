@@ -96,6 +96,16 @@
   unclassified or changes class. `syncro_invoices_email` is classified
   destructive, and its description now warns that sending cannot be undone.
 
+- **`syncro_invoices_email` now goes through the destructive write guard.**
+  It previously called Syncro directly even though it is annotated
+  destructive. It now asks the user through MCP elicitation when the client
+  supports it. When the client cannot elicit (always the case over HTTP), it
+  returns "Confirmation required" unless the call passes `confirm: true`; a
+  new optional `confirm` argument was added for that. Callers that used to
+  email an invoice without `confirm` over HTTP or stdio without elicitation
+  must now pass it. See "Write confirmation" above for what `confirm` does
+  and does not enforce.
+
 ### Fixed
 
 - **`syncro_status` and the unknown-tool error advised calling

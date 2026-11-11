@@ -247,12 +247,42 @@ describe("domains/invoices.ts", () => {
       });
     });
 
+    // These tests run without an MCP server, so the real write guard sees no
+    // client that can elicit and requires `confirm: true`.
     describe("syncro_invoices_email", () => {
+      it("should not email without confirm: true when the client cannot elicit", async () => {
+        for (const confirm of [undefined, false, "true", 1]) {
+          const result = await invoicesHandler.handleCall("syncro_invoices_email", {
+            invoice_id: 123,
+            confirm,
+          });
+
+          expect(result.isError).toBe(true);
+          expect((result.content[0] as { text: string }).text).toContain(
+            "Confirmation required: Email Syncro invoice 123 to the customer? Sending cannot be undone."
+          );
+        }
+        expect(mockClient.invoices.email).not.toHaveBeenCalled();
+      });
+
+      it("should show cc and subject in the confirmation message", async () => {
+        const result = await invoicesHandler.handleCall("syncro_invoices_email", {
+          invoice_id: 123,
+          cc_emails: "boss@acme.com",
+          subject: "Overdue",
+        });
+
+        expect((result.content[0] as { text: string }).text).toContain(
+          'Email Syncro invoice 123 to the customer, cc boss@acme.com, subject "Overdue"? Sending cannot be undone.'
+        );
+      });
+
       it("should email an invoice with required fields only", async () => {
         mockClient.invoices.email.mockResolvedValue(undefined);
 
         const result = await invoicesHandler.handleCall("syncro_invoices_email", {
           invoice_id: 123,
+          confirm: true,
         });
 
         expect(mockClient.invoices.email).toHaveBeenCalledWith(123, {
@@ -274,6 +304,7 @@ describe("domains/invoices.ts", () => {
           cc_emails: "accounting@company.com,manager@company.com",
           subject: "Your Monthly Invoice",
           message: "Please find your invoice attached. Thank you for your business!",
+          confirm: true,
         });
 
         expect(mockClient.invoices.email).toHaveBeenCalledWith(456, {

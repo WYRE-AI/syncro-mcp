@@ -7,6 +7,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import { guardWrite } from "../utils/write-guard.js";
+import { clip } from "../utils/prompt-text.js";
 import {
   ADDITIVE_WRITE,
   DESTRUCTIVE,
@@ -121,6 +123,11 @@ function getTools(): Tool[] {
             type: "string",
             description: "Custom email message body",
           },
+          confirm: {
+            type: "boolean",
+            description:
+              "Set true only after the user approved sending this email. Required when the client cannot show a confirmation prompt (always the case over HTTP)",
+          },
         },
         required: ["invoice_id"],
       },
@@ -198,6 +205,14 @@ async function handleCall(
 
     case "syncro_invoices_email": {
       const invoiceId = args.invoice_id as number;
+      const cc = args.cc_emails ? `, cc ${clip(args.cc_emails)}` : "";
+      const subject = args.subject ? `, subject "${clip(args.subject)}"` : "";
+      const blocked = await guardWrite(
+        `Email Syncro invoice ${invoiceId} to the customer${cc}${subject}? Sending cannot be undone.`,
+        { destructive: true, args }
+      );
+      if (blocked) return blocked;
+
       await client.invoices.email(invoiceId, {
         cc_emails: args.cc_emails as string | undefined,
         subject: args.subject as string | undefined,
