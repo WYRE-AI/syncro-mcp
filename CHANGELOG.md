@@ -2,6 +2,44 @@
 
 ### Security
 
+- **Every id that reaches a request path is validated, including in the
+  SDK-backed tools.** Only the REST-helper tools checked path ids. The SDK
+  builds paths such as `/tickets/<id>/comment` with no encoding and `fetch`
+  resolves `..` segments, so a crafted string id in `syncro_tickets_get`,
+  `_update` or `_add_comment`, `syncro_customers_get`, `syncro_contacts_get`,
+  `syncro_assets_get` or `syncro_invoices_get` could send a call to a
+  different endpoint than the tool names, including one this server guards
+  with `confirm`. Each of those ids now goes through `pathId` first, as does
+  the id of a time entry that Syncro returns and is then used in a path.
+  `tests/domains/path-ids.test.ts` has one row per (tool, id argument), so
+  removing any single check fails a test; it includes the seven existing
+  checks that had no test (`time_log_entry` `ticket_id`, `set_billable`
+  `timer_id`, `get_patches` and `list_installed_applications` `asset_id`,
+  `set_policy_folder` `asset_id` and `policy_folder_id`, `run_script`
+  `asset_id`).
+
+- **A destructive prompt now shows exactly what is sent, or the call is
+  refused.** `syncro_assets_run_script` (`run_as`, variable names and values)
+  and `syncro_invoices_email` (`cc_emails`, `subject`, `message`) used to
+  collapse whitespace and drop control characters for display while sending the
+  raw value, and measured length limits on the collapsed text. They now refuse
+  a value that is not a string or that contains a control character other than
+  newline and tab, a format, private-use, unassigned or surrogate character, a
+  line or paragraph separator, or a character that draws nothing (for example
+  U+2800, U+3164, U+FFA0, U+115F, U+1160). Length limits are measured on the
+  raw value, and the prompt shows the raw value as a JSON string, so a newline
+  appears as `\n`. One helper, `quoteInFull` in `src/utils/prompt-text.ts`.
+
+- **A malformed `Host` header or request target no longer stops the HTTP
+  server.** The listener parsed the request target against the client's `Host`
+  header before authentication, and a value `URL` could not parse threw out of
+  the request handler, which exits the process. The target is now parsed
+  against a fixed base inside a guard, so the `Host` header is not consulted;
+  an unparseable target is answered with a 400 JSON body and the server keeps
+  serving. Routes, the S2S check, the credential check and the responses to
+  valid requests are unchanged. (The MCP transport itself still answers 400 to
+  an unparseable `Host` on `/mcp`, after the S2S check.)
+
 - **The Syncro subdomain is validated before it becomes a host name.** It was
   used as-is in `https://<subdomain>.syncromsp.com`, so a value containing `/`
   or `#` (for example from the `X-Syncro-Subdomain` header or
@@ -92,42 +130,46 @@
     per-tool tier policy; restrict `syncro_assets_run_script` to the admin
     tier.
   - **Prompt contents:** a prompt shows what the call will send. Free text
-    from the caller (notes, a line item name, `run_as`, script variables, an
-    email's cc, subject and message) is reduced to one line, stripped of
-    control and format characters (`\p{C}`, for example ESC, NUL and
-    right-to-left override) and shown in double quotes with embedded quotes
-    escaped, through one helper, `src/utils/prompt-text.ts`. Time entry notes
-    and a line item name show their first 200 characters and state the full
-    length. The destructive tools show everything or refuse: see "Stricter
-    argument validation" below.
-  - **Write failures:** a write that hits a network error or gets a 5xx from
-    Syncro reports that it may or may not have been applied and that Syncro
-    should be checked before retrying; so does a write through the REST
-    helper that times out (30s). A 4xx is reported as a plain rejection. This
-    covers the REST-helper writes and the SDK-backed writes
-    (`syncro_tickets_create`, `syncro_tickets_update`,
-    `syncro_tickets_add_comment`, `syncro_customers_create`,
-    `syncro_contacts_create`, `syncro_invoices_create` and
-    `syncro_invoices_email`), through one wrapper, `sdkWrite` in
-    `src/utils/write-outcome.ts`. The SDK sets no timeout of its own. The REST
-    helper never retries, but the SDK may retry a POST after a 5xx or a 429,
-    so an SDK-backed write can be sent more than once. An error body that ends
-    in a full stop no longer produces `..` before that sentence.
+    that cannot change what the call does (time entry notes, a line item name
+    and description) is reduced to one line, stripped of control and format
+    characters (`\p{C}`, for example ESC, NUL and right-to-left override),
+    shown in double quotes with embedded quotes escaped, and cut at 200
+    characters with the full length stated. The destructive tools show the raw
+    value or refuse; see the Security entry above. A line item prompt shows
+    every field it sends: quantity, name, description, unit price, unit cost,
+    catalog product and taxable. All through `src/utils/prompt-text.ts`.
+  - **Write failures:** only a 4xx response (including a 429) means Syncro
+    rejected a write, and it is reported as a plain rejection. A write that
+    ends any other way (network error, timeout, a 5xx or other non-4xx status,
+    or a 2xx whose body is not JSON) reports that it may or may not have been
+    applied and that Syncro should be checked before retrying. This covers the
+    REST-helper writes and the SDK-backed writes (`syncro_tickets_create`,
+    `syncro_tickets_update`, `syncro_tickets_add_comment`,
+    `syncro_customers_create`, `syncro_contacts_create`,
+    `syncro_invoices_create` and `syncro_invoices_email`), through
+    `syncroRest` and one wrapper, `sdkWrite` in `src/utils/write-outcome.ts`.
+    Every write is sent once; see "Writes are sent once" under Fixed. The REST
+    helper sets a 30s timeout; the SDK sets none and this server does not add
+    one. An error body that ends in a full stop no longer produces `..` before
+    that sentence.
   - **Stricter argument validation:** these checks run before a prompt is
     built or a request is sent, and a failure is returned as an error with no
     outbound call. `asset_id`, `script_id`, `policy_folder_id`, `ticket_id`,
     `timer_id` and `invoice_id` (and `user_id` and `product_id` on
-    `syncro_time_log_entry`) must be positive integers; `script_id` and
-    `invoice_id` were previously passed through unchecked. `duration_minutes`,
-    `quantity` and `price_retail` must be finite numbers. `run_at`,
-    `start_at` and `end_at` must be ISO 8601 date-times
-    (`2026-11-07T02:00:00Z`, with an optional offset); a date-only value is
-    rejected. `syncro_assets_run_script` lists every variable name and value in
-    its prompt and refuses the call if `run_as` or a variable name or value is
-    over 200 characters, or the variables together are over 1000 characters
-    when listed. `syncro_invoices_email` shows cc, subject and message and
-    refuses the call if cc or subject is over 200 characters or the message is
-    over 1000. Lengths are measured on the text as shown.
+    `syncro_time_log_entry` and `syncro_tickets_add_line_item`) must be
+    positive integers; `script_id` and `invoice_id` were previously passed
+    through unchecked. `duration_minutes` must be a positive whole number
+    (Syncro's schema says integer) and `quantity` a number above 0;
+    `price_retail` and `price_cost` must be finite numbers. `billable` and
+    `taxable` must be real booleans. `run_at`, `start_at` and `end_at` must be
+    real ISO 8601 date-times with `Z` or an offset (`2026-11-07T02:00:00Z`);
+    a date-only value, a value with no offset and an impossible date such as
+    the 31st of February are rejected. `syncro_assets_run_script` refuses the
+    call if `run_as` or a variable name or value is over 200 characters, or the
+    variables together are over 1000 characters when listed, and
+    `syncro_invoices_email` refuses it if cc or subject is over 200 characters
+    or the message is over 1000; see the Security entry above for what else is
+    refused.
   - See `docs/WYREAI-464-capability-diff.md` for the capability diff and the
     jobs deferred for lack of a Syncro API (backup status, KB-level patch
     approval, recurring script schedules).
@@ -178,6 +220,37 @@
 
 ### Fixed
 
+- **Writes are sent once.** The SDK resends a POST after a 5xx or 429, so one
+  call to `syncro_tickets_create`, `_add_comment`, `syncro_invoices_email` or
+  another SDK-backed write could create a record or send an email several
+  times, and a 429 on a resend after a 5xx was reported as a plain rejection
+  although the first attempt may have been applied. SDK-backed writes now run
+  on a second client (`getWriteClient` in `src/utils/client.ts`) with the
+  SDK's retries turned off, through `sdkWrite`. Reads keep the SDK's retries.
+  The SDK counts rate limit use per client, so reads and writes each count
+  against their own budget. The SDK has no request timeout, and none was added
+  to SDK-backed writes.
+- **A 2xx whose body is not JSON, on a REST-helper write, now carries the
+  unknown-outcome note.** It reported a plain "Expected JSON" error although
+  the write may have been applied. A write that gets a status other than a 2xx
+  or 4xx gets the note as well; a read never does.
+- **Time and line item arguments are validated more strictly.** `billable`
+  (both time tools) must be a real boolean: the string `"false"` was shown in
+  the prompt as billable and sent as text. `duration_minutes` and `quantity`
+  must be positive. `isoTimestamp` rejects impossible dates and requires `Z`
+  or an offset, to match the tool descriptions. A line item prompt shows
+  `product_id`, `description`, `price_cost` and `taxable`, and `product_id`,
+  `price_cost` and `taxable` are validated.
+- **Documentation.** The README's rate limit section said the SDK handles rate
+  limiting for every tool, which is not true for the REST-helper tools, and
+  named the package `@wyre-technology/node-syncro` instead of
+  `@wyre-ai/node-syncro`; both are corrected. The README now says plainly that
+  `syncro_tickets_add_comment` and `syncro_tickets_create` with `comment_body`
+  can email the customer and are not confirm-gated, and that
+  `syncro_assets_set_policy_folder` changes which policies apply to a managed
+  device. The `syncro_navigate` descriptions of the invoices and tickets
+  domains now list create, email, comment and line item operations, and no
+  longer claim update tools for customers and contacts that do not exist.
 - **`syncro_status` no longer echoes a subdomain the client rejects.** It
   printed the raw configured subdomain and said "Configured" for a value that
   every other tool refuses. It now prints the subdomain only when it passes the

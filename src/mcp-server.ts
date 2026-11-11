@@ -30,14 +30,15 @@ export type { RequestCredentials as SyncroCredentials };
  */
 const domainDescriptions: Record<DomainName, string> = {
   customers:
-    "Customer management - list, get, create, and update customer accounts and information",
+    "Customer management - list, get, search, and create customer accounts",
   tickets:
-    "Ticket management - list, get, create, and update support tickets and workflow",
+    "Ticket management - list, get, create, and update tickets, add comments (a public comment is emailed to the customer unless hidden), and add billable line items",
   assets:
     "Asset and RMM management - list and get assets, read patch status and installed software, set policy folders, and run RMM scripts",
   contacts:
-    "Contact management - list, get, create, and update customer contacts and relationships",
-  invoices: "Invoice management - list and get billing and invoice information",
+    "Contact management - list, get, and create customer contacts",
+  invoices:
+    "Invoice management - list, get, create, and email invoices (emailing cannot be undone)",
   time: "Ticket time entries - log billable or non-billable time and list unbilled work",
 };
 
