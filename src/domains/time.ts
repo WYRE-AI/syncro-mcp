@@ -22,7 +22,7 @@ import {
   syncroRest,
 } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
-import { quote } from "../utils/prompt-text.js";
+import { MAX_LONG_TEXT_PROMPT, quoteInFull } from "../utils/prompt-text.js";
 import {
   READ_ONLY,
   ADDITIVE_WRITE,
@@ -118,7 +118,11 @@ function getTools(): Tool[] {
             description:
               "Whether the time is billable. Omit to use the account's default billable setting",
           },
-          notes: { type: "string", description: "Work description" },
+          notes: {
+            type: "string",
+            description:
+              "Work description, shown in the confirmation prompt exactly as sent. Up to 1000 characters. Refused, with no prompt and no request, if it contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space)",
+          },
           product_id: {
             type: "number",
             description: "Labor product ID that sets the rate (optional)",
@@ -235,7 +239,11 @@ async function handleCall(
       const technician =
         userId === undefined ? "the API token owner" : `user ${userId}`;
       const product = productId === undefined ? "none" : productId;
-      const notes = args.notes === undefined ? "none" : quote(args.notes);
+      // The notes are sent as they are, so they are shown in full or refused.
+      const notes =
+        args.notes === undefined
+          ? "none"
+          : quoteInFull(args.notes, "notes", MAX_LONG_TEXT_PROMPT);
       const blocked = await guardWrite(
         `Log time (${span}; ${billing}) on Syncro ticket ${ticketId} for ${technician}, labor product: ${product}, notes: ${notes}?`
       );

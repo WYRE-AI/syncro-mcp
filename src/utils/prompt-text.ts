@@ -2,15 +2,20 @@
  * Render caller-supplied text for a confirmation prompt.
  *
  * Every free-text value in a prompt goes through here, so a caller cannot
- * forge prompt text. {@link quote} shows a value that cannot change what the
- * action does: it is reduced to one line, stripped of control and format
- * characters (ESC, NUL, right-to-left override and the like), cut when long,
- * and shown as a JSON string. {@link quoteInFull} shows a value the user must
- * see exactly as it is sent, so it never cleans or cuts: it refuses instead.
+ * forge prompt text. The rule: a value that is sent to Syncro is shown with
+ * {@link quoteInFull}, so what the user approves is exactly what is sent. It
+ * never cleans or cuts the value: it shows the raw text as a JSON string, or
+ * refuses it. {@link quote} is only for a value that is not sent as it is,
+ * such as a name inside an error message: it reduces the value to one line,
+ * strips control and format characters (ESC, NUL, right-to-left override and
+ * the like) and cuts it when long.
  */
 
 /** Longest value {@link quote} and {@link quoteInFull} show by default. */
 const MAX_PROMPT_VALUE = 200;
+
+/** Longest long-form text (a message, notes or a description) a prompt shows in full. */
+export const MAX_LONG_TEXT_PROMPT = 1000;
 
 /** One line of text: any run of whitespace, control or format characters becomes one space. */
 function oneLine(value: unknown): string {
@@ -19,9 +24,9 @@ function oneLine(value: unknown): string {
 }
 
 /**
- * Show a value for a prompt, cut to `max` characters with the full length
- * stated when it is longer. Use it where a long value cannot change what the
- * action does; use {@link quoteInFull} where the user has to see all of it.
+ * Show a value that is not sent as it is (for example a name inside an error
+ * message), cut to `max` characters with the full length stated when it is
+ * longer. A value that is sent to Syncro must use {@link quoteInFull}.
  */
 export function quote(value: unknown, max = MAX_PROMPT_VALUE): string {
   const characters = [...oneLine(value)];

@@ -621,6 +621,35 @@ describe("domains/assets.ts", () => {
         expect(JSON.parse(shown!)).toBe(sent);
       });
 
+      it("sends every variable exactly as the prompt shows it", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+        const variables = {
+          " lead": "trail ",
+          "second\tkey": ' "quoted" \\ \r\nline ',
+          third: "x".repeat(200),
+        };
+
+        await assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          variables,
+        });
+
+        const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+        for (const [name, value] of Object.entries(variables)) {
+          expect(prompt).toContain(
+            `${JSON.stringify(name)} = ${JSON.stringify(value)}`
+          );
+        }
+        const [, request] = vi.mocked(restModule.syncroRest).mock.calls[0];
+        const sent = (
+          request?.body as {
+            script_options: { runtime_variables: Record<string, string> };
+          }
+        ).script_options.runtime_variables;
+        expect(sent).toStrictEqual(variables);
+      });
+
       it.each([
         ["run_as", { run_as: "system\u001b[2J" }, /run_as contains the character U\+001B/],
         ["run_as", { run_as: "sys\u2800tem" }, /run_as contains the character U\+2800/],

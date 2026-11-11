@@ -10,15 +10,12 @@ import { getClient } from "../utils/client.js";
 import { pathId } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
 import { sdkWrite } from "../utils/write-outcome.js";
-import { quoteInFull } from "../utils/prompt-text.js";
+import { MAX_LONG_TEXT_PROMPT, quoteInFull } from "../utils/prompt-text.js";
 import {
   ADDITIVE_WRITE,
   DESTRUCTIVE,
   READ_ONLY,
 } from "../utils/annotations.js";
-
-/** Longest email message the confirmation prompt shows in full. */
-const MAX_MESSAGE_PROMPT = 1000;
 
 /**
  * Get invoice domain tools
@@ -107,7 +104,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_invoices_email",
       description:
-        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. The confirmation prompt shows cc_emails, subject and message exactly as sent, so the call is refused if one is not a string, contains a control (other than newline and tab), invisible or unassigned character, or is over its limit (200 characters for cc_emails and subject, 1000 for message). Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve.",
+        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. The confirmation prompt shows cc_emails, subject and message exactly as sent, so the call is refused if one is not a string, contains a control or invisible character (newline, carriage return and tab are allowed), a space other than the plain space (such as a non-breaking space), or is over its limit (200 characters for cc_emails and subject, 1000 for message). Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve.",
       annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
@@ -226,7 +223,7 @@ async function handleCall(
       const message =
         args.message === undefined
           ? ""
-          : `, message ${quoteInFull(args.message, "message", MAX_MESSAGE_PROMPT)}`;
+          : `, message ${quoteInFull(args.message, "message", MAX_LONG_TEXT_PROMPT)}`;
       const blocked = await guardWrite(
         `Email Syncro invoice ${invoiceId} to the customer${cc}${subject}${message}? Sending cannot be undone.`,
         { destructive: true, args }

@@ -19,7 +19,7 @@ import {
 } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
 import { sdkWrite } from "../utils/write-outcome.js";
-import { quote } from "../utils/prompt-text.js";
+import { MAX_LONG_TEXT_PROMPT, quoteInFull } from "../utils/prompt-text.js";
 import {
   READ_ONLY,
   ADDITIVE_WRITE,
@@ -228,10 +228,15 @@ function getTools(): Tool[] {
         type: "object" as const,
         properties: {
           ticket_id: { type: "number", description: "The ticket ID (required)" },
-          name: { type: "string", description: "Line item name (required)" },
+          name: {
+            type: "string",
+            description:
+              "Line item name (required), shown in the confirmation prompt exactly as sent. Up to 200 characters. Refused, with no prompt and no request, if it contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space)",
+          },
           description: {
             type: "string",
-            description: "Line item description (required by Syncro)",
+            description:
+              "Line item description (required by Syncro), shown in the confirmation prompt exactly as sent. Up to 1000 characters. Refused, with no prompt and no request, if it contains a control or invisible character (newline, carriage return and tab are allowed) or a space other than the plain space (such as a non-breaking space)",
           },
           quantity: { type: "number", description: "Quantity, greater than 0 (default: 1)" },
           price_retail: { type: "number", description: "Unit price charged to the customer" },
@@ -416,15 +421,23 @@ async function handleCall(
           : positiveInteger(args.product_id, "product_id");
       const taxable =
         args.taxable === undefined ? undefined : booleanArg(args.taxable, "taxable");
-      // Every field that is sent below is shown here.
+      // Every field that is sent below is shown here, and name and
+      // description in full (or the call is refused).
+      const name =
+        args.name === undefined
+          ? "an item with no name"
+          : quoteInFull(args.name, "name");
+      const description =
+        args.description === undefined
+          ? "not set"
+          : quoteInFull(args.description, "description", MAX_LONG_TEXT_PROMPT);
       const details = [
         `unit price ${priceRetail ?? "not set"}`,
         `unit cost ${priceCost ?? "not set"}`,
         `catalog product ${productId ?? "none"}`,
         `taxable ${taxable ?? "not set"}`,
-        `description ${args.description === undefined ? "not set" : quote(args.description)}`,
+        `description ${description}`,
       ].join(", ");
-      const name = args.name === undefined ? "an item with no name" : quote(args.name);
       const blocked = await guardWrite(
         `Add ${quantity} x ${name} (${details}) to Syncro ticket ${ticketId}?`
       );
