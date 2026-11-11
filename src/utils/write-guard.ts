@@ -12,10 +12,22 @@ import type { CallToolResult } from "./types.js";
 import { confirmWrite } from "./elicitation.js";
 
 export interface WriteGuardOptions {
+  /** Require `args.confirm === true` when the client cannot elicit. */
   destructive?: boolean;
+  /** The tool call arguments, read for the `confirm` flag. */
   args?: Record<string, unknown>;
 }
 
+/**
+ * Ask the user to confirm a write before it reaches Syncro.
+ *
+ * Callers must check the return value: `null` means proceed with the write;
+ * any other value is a result to return to the client as-is, without writing.
+ * `options.args.confirm` is consulted only when `options.destructive` is set.
+ *
+ * @throws When the client supports elicitation but the prompt fails, so the
+ *   write is never run unconfirmed.
+ */
 export async function guardWrite(
   message: string,
   options: WriteGuardOptions = {}

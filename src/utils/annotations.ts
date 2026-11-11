@@ -39,6 +39,7 @@ export const DESTRUCTIVE: ToolAnnotations = {
   openWorldHint: true,
 };
 
+/** Read the class a tool's annotations declare, or `null` if unclassified. */
 export function classifyTool(
   annotations: ToolAnnotations | undefined
 ): ToolClass | null {

@@ -41,6 +41,9 @@ interface TicketTimerListResponse {
 const TIMER_STATUSES = ["running", "paused", "stopped"];
 const BILLING_STATUSES = ["non-billable", "unbilled", "billed", "invoiced"];
 
+/**
+ * Get time domain tools
+ */
 function getTools(): Tool[] {
   return [
     {
@@ -136,14 +139,19 @@ function getTools(): Tool[] {
   ];
 }
 
+/** Wrap a value as a successful JSON tool result. */
 function json(value: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 
+/** Wrap a message as an error tool result. */
 function error(text: string): CallToolResult {
   return { content: [{ type: "text", text }], isError: true };
 }
 
+/**
+ * Handle a time domain tool call
+ */
 async function handleCall(
   toolName: string,
   args: Record<string, unknown>

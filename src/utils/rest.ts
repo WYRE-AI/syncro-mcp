@@ -26,6 +26,7 @@ export interface RestOptions {
   body?: unknown;
 }
 
+/** A failed Syncro REST call. `status` is `0` when no response was received. */
 export class SyncroRestError extends Error {
   readonly status: number;
   readonly body: unknown;
@@ -50,6 +51,7 @@ export function pathId(value: unknown, label: string): number {
   return value;
 }
 
+/** Pull a short, human-readable message out of a Syncro error body. */
 function describeErrorBody(body: unknown): string {
   if (body && typeof body === "object") {
     const record = body as Record<string, unknown>;
@@ -64,6 +66,16 @@ function describeErrorBody(body: unknown): string {
   return "no error detail returned";
 }
 
+/**
+ * Call the Syncro REST API with the current request's credentials.
+ *
+ * @param path Endpoint path starting with `/`, relative to `/api/v1`
+ *   (for example `/ticket_timers`). Build IDs into it with {@link pathId}.
+ * @param options HTTP method (default `GET`), query params and JSON body.
+ * @returns The parsed JSON response, or `{}` when the body is empty.
+ * @throws {SyncroRestError} On a non-2xx status, a non-JSON success body, or a
+ *   timeout (status `0`). A timed-out write may still have been applied.
+ */
 export async function syncroRest<T>(
   path: string,
   options: RestOptions = {}
