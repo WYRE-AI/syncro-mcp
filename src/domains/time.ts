@@ -14,9 +14,9 @@
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
-import { pathId, syncroRest } from "../utils/rest.js";
+import { finiteNumber, isoTimestamp, pathId, syncroRest } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
-import { clip } from "../utils/prompt-text.js";
+import { quote } from "../utils/prompt-text.js";
 import {
   READ_ONLY,
   ADDITIVE_WRITE,
@@ -194,11 +194,26 @@ async function handleCall(
         return error("Provide either end_at or duration_minutes.");
       }
 
+      // Check every value before the prompt is built or anything is sent.
+      const startAt = isoTimestamp(args.start_at, "start_at");
+      const endAt =
+        args.end_at === undefined ? undefined : isoTimestamp(args.end_at, "end_at");
+      const minutes =
+        args.duration_minutes === undefined
+          ? undefined
+          : finiteNumber(args.duration_minutes, "duration_minutes");
+      const userId =
+        args.user_id === undefined ? undefined : pathId(args.user_id, "user_id");
+      const productId =
+        args.product_id === undefined
+          ? undefined
+          : pathId(args.product_id, "product_id");
+
       const billable = args.billable as boolean | undefined;
       const span =
-        args.duration_minutes !== undefined
-          ? `${args.duration_minutes} minutes`
-          : `${args.start_at} to ${args.end_at}`;
+        `starting ${startAt}` +
+        (endAt ? `, ending ${endAt}` : "") +
+        (minutes !== undefined ? `, ${minutes} minutes` : "");
       const billing =
         billable === undefined
           ? "account default billing"
@@ -206,15 +221,11 @@ async function handleCall(
             ? "billable"
             : "non-billable";
       const technician =
-        args.user_id === undefined
-          ? "the API token owner"
-          : `user ${clip(args.user_id)}`;
-      const product =
-        args.product_id === undefined ? "none" : clip(args.product_id);
-      const notes =
-        args.notes === undefined ? "none" : `"${clip(args.notes)}"`;
+        userId === undefined ? "the API token owner" : `user ${userId}`;
+      const product = productId === undefined ? "none" : productId;
+      const notes = args.notes === undefined ? "none" : quote(args.notes);
       const blocked = await guardWrite(
-        `Log ${span} (${billing}) on Syncro ticket ${ticketId} for ${technician}, labor product: ${product}, notes: ${notes}?`
+        `Log time (${span}; ${billing}) on Syncro ticket ${ticketId} for ${technician}, labor product: ${product}, notes: ${notes}?`
       );
       if (blocked) return blocked;
 
@@ -223,12 +234,12 @@ async function handleCall(
         {
           method: "POST",
           body: {
-            start_at: args.start_at,
-            end_at: args.end_at,
-            duration_minutes: args.duration_minutes,
+            start_at: startAt,
+            end_at: endAt,
+            duration_minutes: minutes,
             notes: args.notes,
-            product_id: args.product_id,
-            user_id: args.user_id,
+            product_id: productId,
+            user_id: userId,
           },
         }
       );

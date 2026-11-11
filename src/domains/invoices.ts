@@ -7,13 +7,18 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import { pathId } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
-import { clip } from "../utils/prompt-text.js";
+import { sdkWrite } from "../utils/write-outcome.js";
+import { quoteInFull } from "../utils/prompt-text.js";
 import {
   ADDITIVE_WRITE,
   DESTRUCTIVE,
   READ_ONLY,
 } from "../utils/annotations.js";
+
+/** Longest email message the confirmation prompt shows in full. */
+const MAX_MESSAGE_PROMPT = 1000;
 
 /**
  * Get invoice domain tools
@@ -102,7 +107,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_invoices_email",
       description:
-        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve.",
+        "⚠ HIGH-IMPACT. Email an invoice to the customer. Sending cannot be undone. The confirmation prompt shows cc_emails, subject and message in full, so the call is refused if cc_emails or subject is over 200 characters or message is over 1000. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve.",
       annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
@@ -191,12 +196,14 @@ async function handleCall(
     }
 
     case "syncro_invoices_create": {
-      const invoice = await client.invoices.create({
-        customer_id: args.customer_id as number,
-        date: args.date as string | undefined,
-        due_date: args.due_date as string | undefined,
-        notes: args.notes as string | undefined,
-      });
+      const invoice = await sdkWrite(() =>
+        client.invoices.create({
+          customer_id: args.customer_id as number,
+          date: args.date as string | undefined,
+          due_date: args.due_date as string | undefined,
+          notes: args.notes as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(invoice, null, 2) }],
@@ -204,20 +211,35 @@ async function handleCall(
     }
 
     case "syncro_invoices_email": {
-      const invoiceId = args.invoice_id as number;
-      const cc = args.cc_emails ? `, cc ${clip(args.cc_emails)}` : "";
-      const subject = args.subject ? `, subject "${clip(args.subject)}"` : "";
+      const invoiceId = pathId(args.invoice_id, "invoice_id");
+      // The user approves exactly what the prompt shows, and an email cannot
+      // be recalled, so cc, subject and message are shown in full or the
+      // call is refused.
+      const cc =
+        args.cc_emails === undefined
+          ? ""
+          : `, cc ${quoteInFull(args.cc_emails, "cc_emails")}`;
+      const subject =
+        args.subject === undefined
+          ? ""
+          : `, subject ${quoteInFull(args.subject, "subject")}`;
+      const message =
+        args.message === undefined
+          ? ""
+          : `, message ${quoteInFull(args.message, "message", MAX_MESSAGE_PROMPT)}`;
       const blocked = await guardWrite(
-        `Email Syncro invoice ${invoiceId} to the customer${cc}${subject}? Sending cannot be undone.`,
+        `Email Syncro invoice ${invoiceId} to the customer${cc}${subject}${message}? Sending cannot be undone.`,
         { destructive: true, args }
       );
       if (blocked) return blocked;
 
-      await client.invoices.email(invoiceId, {
-        cc_emails: args.cc_emails as string | undefined,
-        subject: args.subject as string | undefined,
-        message: args.message as string | undefined,
-      });
+      await sdkWrite(() =>
+        client.invoices.email(invoiceId, {
+          cc_emails: args.cc_emails as string | undefined,
+          subject: args.subject as string | undefined,
+          message: args.message as string | undefined,
+        })
+      );
 
       return {
         content: [

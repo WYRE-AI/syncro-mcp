@@ -7,6 +7,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
+import { sdkWrite } from "../utils/write-outcome.js";
 import {
   ADDITIVE_WRITE,
   READ_ONLY,
@@ -222,20 +223,22 @@ async function handleCall(
     }
 
     case "syncro_customers_create": {
-      const customer = await client.customers.create({
-        business_name: args.business_name as string | undefined,
-        firstname: args.firstname as string | undefined,
-        lastname: args.lastname as string | undefined,
-        email: args.email as string | undefined,
-        phone: args.phone as string | undefined,
-        mobile: args.mobile as string | undefined,
-        address: args.address as string | undefined,
-        address_2: args.address_2 as string | undefined,
-        city: args.city as string | undefined,
-        state: args.state as string | undefined,
-        zip: args.zip as string | undefined,
-        notes: args.notes as string | undefined,
-      });
+      const customer = await sdkWrite(() =>
+        client.customers.create({
+          business_name: args.business_name as string | undefined,
+          firstname: args.firstname as string | undefined,
+          lastname: args.lastname as string | undefined,
+          email: args.email as string | undefined,
+          phone: args.phone as string | undefined,
+          mobile: args.mobile as string | undefined,
+          address: args.address as string | undefined,
+          address_2: args.address_2 as string | undefined,
+          city: args.city as string | undefined,
+          state: args.state as string | undefined,
+          zip: args.zip as string | undefined,
+          notes: args.notes as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(customer, null, 2) }],

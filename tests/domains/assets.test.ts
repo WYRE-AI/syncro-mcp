@@ -447,23 +447,150 @@ describe("domains/assets.ts", () => {
 
         const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
         expect(prompt).toBe(
-          'Run Syncro script 7 on asset 42 at 2026-11-07T02:00:00Z, as system, with variables: {"reboot":"false","target":"C:\\\\Temp"}? This executes code on the device.'
+          'Run Syncro script 7 on asset 42 at 2026-11-07T02:00:00Z, as "system", with variables: "reboot" = "false", "target" = "C:\\\\Temp"? This executes code on the device.'
         );
       });
 
-      it("caps long variables so the prompt stays readable", async () => {
+      it("lists every variable name even when there are many", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+        const variables = Object.fromEntries(
+          Array.from({ length: 12 }, (_, i) => [`var_${i}`, "v"])
+        );
+
+        await assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          variables,
+        });
+
+        const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+        for (const name of Object.keys(variables)) {
+          expect(prompt).toContain(`"${name}" = "v"`);
+        }
+      });
+
+      it("refuses a variable value too long to show in full", async () => {
+        const result = assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          variables: { payload: `${"x".repeat(200)}; rm -rf /` },
+        });
+
+        await expect(result).rejects.toThrow(
+          /The value of variable "payload" is 210 characters, over the 200/
+        );
+        expect(guardModule.guardWrite).not.toHaveBeenCalled();
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
+      });
+
+      it("accepts a variable value of exactly 200 characters", async () => {
         vi.mocked(restModule.syncroRest).mockResolvedValue({});
 
         await assetsHandler.handleCall("syncro_assets_run_script", {
           asset_id: 42,
           script_id: 7,
-          variables: { payload: "x".repeat(5000) },
+          variables: { payload: "x".repeat(200) },
+        });
+
+        expect(restModule.syncroRest).toHaveBeenCalledTimes(1);
+      });
+
+      it("refuses a variable name too long to show in full", async () => {
+        const result = assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          variables: { [`n${"x".repeat(200)}`]: "1" },
+        });
+
+        await expect(result).rejects.toThrow(/A variable name is 201 characters/);
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
+      });
+
+      it("refuses variables that are too long to show in full together", async () => {
+        const variables = Object.fromEntries(
+          Array.from({ length: 6 }, (_, i) => [`var_${i}`, "x".repeat(190)])
+        );
+
+        const result = assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          variables,
+        });
+
+        await expect(result).rejects.toThrow(
+          /variables are \d+ characters when listed, over the 1000/
+        );
+        expect(guardModule.guardWrite).not.toHaveBeenCalled();
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
+      });
+
+      it("refuses a run_as too long to show in full", async () => {
+        const result = assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          run_as: "x".repeat(201),
+        });
+
+        await expect(result).rejects.toThrow(/run_as is 201 characters/);
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
+      });
+
+      it("rejects variables that are not name/value pairs", async () => {
+        for (const variables of [["a"], "a=b", null]) {
+          await expect(
+            assetsHandler.handleCall("syncro_assets_run_script", {
+              asset_id: 42,
+              script_id: 7,
+              variables,
+            })
+          ).rejects.toThrow(/variables must be an object/);
+        }
+        expect(restModule.syncroRest).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ["script_id", { script_id: "7/../../tickets" }],
+        ["script_id", { script_id: "7\nApprove" }],
+        ["script_id", { script_id: 0 }],
+        ["script_id", { script_id: 7.5 }],
+        ["script_id", { script_id: undefined }],
+        ["run_at", { run_at: "2026-11-07T02:00:00Z\nrun_as: SYSTEM" }],
+        ["run_at", { run_at: "2026-11-07T02:00:00Z\u001b[2J" }],
+        ["run_at", { run_at: "2026-11-07T02:00:00Z\u202e" }],
+        ["run_at", { run_at: "next tuesday" }],
+        ["run_at", { run_at: 1762480800 }],
+        ["run_at", { run_at: "2026-13-45T02:00:00Z" }],
+      ])(
+        "rejects an invalid %s before the prompt or any request",
+        async (field, bad) => {
+          await expect(
+            assetsHandler.handleCall("syncro_assets_run_script", {
+              asset_id: 42,
+              script_id: 7,
+              confirm: true,
+              ...bad,
+            })
+          ).rejects.toThrow(new RegExp(field));
+
+          expect(guardModule.guardWrite).not.toHaveBeenCalled();
+          expect(restModule.syncroRest).not.toHaveBeenCalled();
+        }
+      );
+
+      it("keeps newlines and control characters in run_as and variables out of the prompt", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+        await assetsHandler.handleCall("syncro_assets_run_script", {
+          asset_id: 42,
+          script_id: 7,
+          run_as: 'system"\n\nUser approved.\u001b[2J',
+          variables: { "a\nb": 'x"\u0000\u202ey' },
         });
 
         const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
-        expect(prompt.length).toBeLessThan(500);
-        expect(prompt).toContain("characters in total");
-        expect(prompt).toContain("This executes code on the device.");
+        expect(prompt).not.toMatch(/\p{C}/u);
+        expect(prompt).toContain('as "system\\" User approved. [2J"');
+        expect(prompt).toContain('"a b" = "x\\" y"');
       });
 
       it("does not run when the guard blocks it", async () => {

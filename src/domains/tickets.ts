@@ -9,8 +9,10 @@ import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
 import { elicitSelection } from "../utils/elicitation.js";
 import { buildTicketCard, TICKET_CARD_META } from "../card.builder.js";
-import { pathId, syncroRest } from "../utils/rest.js";
+import { finiteNumber, pathId, syncroRest } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
+import { sdkWrite } from "../utils/write-outcome.js";
+import { quote } from "../utils/prompt-text.js";
 import {
   READ_ONLY,
   ADDITIVE_WRITE,
@@ -93,7 +95,8 @@ function getTools(): Tool[] {
     },
     {
       name: "syncro_tickets_create",
-      description: "Create a new ticket in Syncro",
+      description:
+        "Create a new ticket in Syncro. comment_body creates an initial comment that may be visible to the customer, and Syncro may email it to them. This tool cannot mark that comment hidden. If the user did not ask to contact the customer, leave comment_body out and add an internal note afterwards with syncro_tickets_add_comment and hidden: true.",
       annotations: ADDITIVE_WRITE,
       inputSchema: {
         type: "object" as const,
@@ -128,7 +131,8 @@ function getTools(): Tool[] {
           },
           comment_body: {
             type: "string",
-            description: "Initial comment/description body",
+            description:
+              "Initial comment/description body. May be visible to the customer and emailed to them; this tool cannot make it hidden",
           },
           comment_subject: {
             type: "string",
@@ -335,17 +339,19 @@ async function handleCall(
     }
 
     case "syncro_tickets_create": {
-      const ticket = await client.tickets.create({
-        customer_id: args.customer_id as number,
-        subject: args.subject as string,
-        problem_type: args.problem_type as string | undefined,
-        status: args.status as string | undefined,
-        contact_id: args.contact_id as number | undefined,
-        user_id: args.user_id as number | undefined,
-        due_date: args.due_date as string | undefined,
-        comment_body: args.comment_body as string | undefined,
-        comment_subject: args.comment_subject as string | undefined,
-      });
+      const ticket = await sdkWrite(() =>
+        client.tickets.create({
+          customer_id: args.customer_id as number,
+          subject: args.subject as string,
+          problem_type: args.problem_type as string | undefined,
+          status: args.status as string | undefined,
+          contact_id: args.contact_id as number | undefined,
+          user_id: args.user_id as number | undefined,
+          due_date: args.due_date as string | undefined,
+          comment_body: args.comment_body as string | undefined,
+          comment_subject: args.comment_subject as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(ticket, null, 2) }],
@@ -354,13 +360,15 @@ async function handleCall(
 
     case "syncro_tickets_update": {
       const ticketId = args.ticket_id as number;
-      const ticket = await client.tickets.update(ticketId, {
-        subject: args.subject as string | undefined,
-        problem_type: args.problem_type as string | undefined,
-        status: args.status as string | undefined,
-        user_id: args.user_id as number | undefined,
-        due_date: args.due_date as string | undefined,
-      });
+      const ticket = await sdkWrite(() =>
+        client.tickets.update(ticketId, {
+          subject: args.subject as string | undefined,
+          problem_type: args.problem_type as string | undefined,
+          status: args.status as string | undefined,
+          user_id: args.user_id as number | undefined,
+          due_date: args.due_date as string | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(ticket, null, 2) }],
@@ -369,12 +377,14 @@ async function handleCall(
 
     case "syncro_tickets_add_comment": {
       const ticketId = args.ticket_id as number;
-      const ticket = await client.tickets.addComment(ticketId, {
-        body: args.body as string,
-        subject: args.subject as string | undefined,
-        hidden: args.hidden as boolean | undefined,
-        do_not_email: args.do_not_email as boolean | undefined,
-      });
+      const ticket = await sdkWrite(() =>
+        client.tickets.addComment(ticketId, {
+          body: args.body as string,
+          subject: args.subject as string | undefined,
+          hidden: args.hidden as boolean | undefined,
+          do_not_email: args.do_not_email as boolean | undefined,
+        })
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify(ticket, null, 2) }],
@@ -383,11 +393,15 @@ async function handleCall(
 
     case "syncro_tickets_add_line_item": {
       const ticketId = pathId(args.ticket_id, "ticket_id");
-      const quantity = (args.quantity as number | undefined) ?? 1;
-      const price =
-        args.price_retail !== undefined ? ` at ${args.price_retail} each` : "";
+      const quantity =
+        args.quantity === undefined ? 1 : finiteNumber(args.quantity, "quantity");
+      const priceRetail =
+        args.price_retail === undefined
+          ? undefined
+          : finiteNumber(args.price_retail, "price_retail");
+      const price = priceRetail === undefined ? "" : ` at ${priceRetail} each`;
       const blocked = await guardWrite(
-        `Add ${quantity} x "${args.name}"${price} to Syncro ticket ${ticketId}?`
+        `Add ${quantity} x ${quote(args.name)}${price} to Syncro ticket ${ticketId}?`
       );
       if (blocked) return blocked;
 
@@ -399,7 +413,7 @@ async function handleCall(
             name: args.name,
             description: args.description,
             quantity,
-            price_retail: args.price_retail,
+            price_retail: priceRetail,
             price_cost: args.price_cost,
             product_id: args.product_id,
             taxable: args.taxable,

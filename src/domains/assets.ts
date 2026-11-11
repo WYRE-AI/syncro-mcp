@@ -7,9 +7,9 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { DomainHandler, CallToolResult } from "../utils/types.js";
 import { getClient } from "../utils/client.js";
-import { pathId, syncroRest } from "../utils/rest.js";
+import { isoTimestamp, pathId, syncroRest } from "../utils/rest.js";
 import { guardWrite } from "../utils/write-guard.js";
-import { clip } from "../utils/prompt-text.js";
+import { quote, quoteInFull } from "../utils/prompt-text.js";
 import {
   READ_ONLY,
   IDEMPOTENT_WRITE,
@@ -148,7 +148,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_assets_set_policy_folder",
       description:
-        "⚠ HIGH-IMPACT. Move an RMM-managed asset into a policy folder, which changes the RMM policy (patch schedule, monitoring, automation) applied to the device. Requires the 'Assets - Edit Policy' permission. Confirm with the user before invoking.",
+        "⚠ HIGH-IMPACT. Move an RMM-managed asset into a policy folder, which changes the RMM policy (patch schedule, monitoring, automation) applied to the device. Moving a device into a policy folder can apply that folder's policies and scripts to it. Requires the 'Assets - Edit Policy' permission. Confirm with the user before invoking.",
       annotations: IDEMPOTENT_WRITE,
       inputSchema: {
         type: "object" as const,
@@ -165,7 +165,7 @@ function getTools(): Tool[] {
     {
       name: "syncro_assets_run_script",
       description:
-        "⚠ DESTRUCTIVE — RUNS CODE ON A MANAGED DEVICE. Schedule an existing Syncro RMM script to run once on an asset, now or at a set time (e.g. a patch-install or remediation script). The script ID comes from the Syncro script library; the API has no endpoint to list scripts. Requires the 'Scripts - Execute' permission. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve this exact run.",
+        "⚠ DESTRUCTIVE — RUNS CODE ON A MANAGED DEVICE. Schedule an existing Syncro RMM script to run once on an asset, now or at a set time (e.g. a patch-install or remediation script). The script ID comes from the Syncro script library; the API has no endpoint to list scripts. The confirmation prompt lists every variable in full, so the call is refused if run_as or a variable name or value is over 200 characters, or the variables together are over 1000 when listed. Requires the 'Scripts - Execute' permission. Confirm with the user before invoking: the user is prompted only over stdio with a client that supports elicitation. Over HTTP (the gateway) there is no prompt, so you must ask the user yourself and pass confirm: true only after they approve this exact run.",
       annotations: DESTRUCTIVE,
       inputSchema: {
         type: "object" as const,
@@ -194,6 +194,39 @@ function getTools(): Tool[] {
       },
     },
   ];
+}
+
+/** Longest list of script variables the run-script prompt shows. */
+const MAX_VARIABLES_PROMPT = 1000;
+
+/**
+ * List every script variable, name and value, for the run-script prompt.
+ * Refuses a variable or a list too long to show whole, so the user is never
+ * asked to approve variables they were not shown.
+ */
+function describeVariables(variables: unknown): string {
+  if (
+    typeof variables !== "object" ||
+    variables === null ||
+    Array.isArray(variables)
+  ) {
+    throw new Error("variables must be an object of name/value pairs");
+  }
+  const entries = Object.entries(variables);
+  if (entries.length === 0) return "none";
+
+  const listed = entries
+    .map(
+      ([name, value]) =>
+        `${quoteInFull(name, "A variable name")} = ${quoteInFull(value, `The value of variable ${quote(name)}`)}`
+    )
+    .join(", ");
+  if (listed.length > MAX_VARIABLES_PROMPT) {
+    throw new Error(
+      `variables are ${listed.length} characters when listed, over the ${MAX_VARIABLES_PROMPT} that can be shown in full in the confirmation prompt. Pass fewer or shorter variables.`
+    );
+  }
+  return listed;
 }
 
 /**
@@ -363,14 +396,21 @@ async function handleCall(
 
     case "syncro_assets_run_script": {
       const assetId = pathId(args.asset_id, "asset_id");
-      const scriptId = args.script_id as number;
-      const runAt = args.run_at as string | undefined;
+      const scriptId = pathId(args.script_id, "script_id");
+      const runAt =
+        args.run_at === undefined
+          ? undefined
+          : isoTimestamp(args.run_at, "run_at");
+      // The user approves exactly what the prompt shows, so run_as and the
+      // variables are shown in full or the call is refused.
       const runAs =
         args.run_as === undefined
           ? "the script's default account"
-          : clip(args.run_as);
+          : quoteInFull(args.run_as, "run_as");
       const variables =
-        args.variables === undefined ? "none" : clip(args.variables);
+        args.variables === undefined
+          ? "none"
+          : describeVariables(args.variables);
       const blocked = await guardWrite(
         `Run Syncro script ${scriptId} on asset ${assetId} ${runAt ? `at ${runAt}` : "now"}, as ${runAs}, with variables: ${variables}? This executes code on the device.`,
         { destructive: true, args }

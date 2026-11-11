@@ -201,6 +201,21 @@ describe("domains/contacts.ts", () => {
         expect(parsed.name).toBe("New Contact");
       });
 
+      it("should report an unknown outcome after a 5xx", async () => {
+        mockClient.contacts.create.mockRejectedValue(
+          Object.assign(new Error("Server error: 504 Gateway Timeout"), {
+            statusCode: 504,
+          })
+        );
+
+        await expect(
+          contactsHandler.handleCall("syncro_contacts_create", {
+            customer_id: 1,
+            name: "x",
+          })
+        ).rejects.toThrow(/may or may not have been applied/);
+      });
+
       it("should create a contact with all fields", async () => {
         const mockContact = { id: 999, name: "Full Contact" };
         mockClient.contacts.create.mockResolvedValue(mockContact);

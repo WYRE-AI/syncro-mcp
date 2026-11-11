@@ -195,6 +195,18 @@ describe("domains/customers.ts", () => {
           notes: undefined,
         });
       });
+
+      it("should report an unknown outcome after a 5xx", async () => {
+        mockClient.customers.create.mockRejectedValue(
+          Object.assign(new Error("Server error: 500 Internal Server Error"), {
+            statusCode: 500,
+          })
+        );
+
+        await expect(
+          customersHandler.handleCall("syncro_customers_create", { business_name: "x" })
+        ).rejects.toThrow(/may or may not have been applied/);
+      });
     });
 
     describe("syncro_customers_search", () => {

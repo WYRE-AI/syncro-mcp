@@ -3,7 +3,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { pathId, syncroRest, SyncroRestError } from "../../src/utils/rest.js";
+import {
+  finiteNumber,
+  isoTimestamp,
+  pathId,
+  syncroRest,
+  SyncroRestError,
+} from "../../src/utils/rest.js";
 import * as clientModule from "../../src/utils/client.js";
 
 vi.mock("../../src/utils/client.js", () => ({
@@ -151,6 +157,15 @@ describe("utils/rest.ts", () => {
       }
     );
 
+    it("does not double the full stop when the error body already ends with one", async () => {
+      fetchMock.mockResolvedValue(new Response("Upstream is down.", { status: 502 }));
+
+      const err = await syncroRest("/x", { method: "POST" }).catch((e) => e);
+
+      expect(err.message).toContain("failed (502): Upstream is down. The change may or may not");
+      expect(err.message).not.toContain("..");
+    });
+
     it("adds no note to a read that fails the same ways", async () => {
       fetchMock.mockResolvedValueOnce(new Response("down", { status: 503 }));
       await expect(syncroRest("/x")).rejects.not.toThrow(UNKNOWN);
@@ -170,6 +185,52 @@ describe("pathId", () => {
     "rejects %j",
     (value) => {
       expect(() => pathId(value, "asset_id")).toThrow(/asset_id/);
+    }
+  );
+});
+
+describe("isoTimestamp", () => {
+  it.each([
+    "2026-11-07T02:00:00Z",
+    "2026-11-07T02:00:00.123Z",
+    "2026-11-07T02:00:00+01:00",
+    "2026-11-07T02:00:00-05:00",
+    "2026-11-07T02:00",
+    "2026-11-07T02:00:00",
+  ])("accepts %s and returns it unchanged", (value) => {
+    expect(isoTimestamp(value, "run_at")).toBe(value);
+  });
+
+  it.each([
+    "tomorrow",
+    "2026-11-07",
+    "2026-13-45T02:00:00Z",
+    "2026-11-07T25:00:00Z",
+    "2026-11-07T02:00:00Z\n",
+    "2026-11-07T02:00:00Z\nrun_as: SYSTEM",
+    "2026-11-07T02:00:00Z\u001b[2J",
+    "2026-11-07T02:00:00Z‮",
+    " 2026-11-07T02:00:00Z",
+    "",
+    1762480800,
+    null,
+    undefined,
+  ])("rejects %j", (value) => {
+    expect(() => isoTimestamp(value, "run_at")).toThrow(/run_at must be an ISO 8601/);
+  });
+});
+
+describe("finiteNumber", () => {
+  it.each([0, 1.5, -3, 150])("accepts %s", (value) => {
+    expect(finiteNumber(value, "price_retail")).toBe(value);
+  });
+
+  it.each(["150", "1\n2", NaN, Infinity, -Infinity, null, undefined, {}])(
+    "rejects %j",
+    (value) => {
+      expect(() => finiteNumber(value, "price_retail")).toThrow(
+        /price_retail must be a finite number/
+      );
     }
   );
 });

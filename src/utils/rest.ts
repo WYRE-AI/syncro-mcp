@@ -14,6 +14,7 @@
  */
 
 import { getClient } from "./client.js";
+import { withUnknownOutcome } from "./write-outcome.js";
 
 /** Deadline for one Syncro REST call, so a stalled request cannot hang a tool. */
 export const REST_TIMEOUT_MS = 30_000;
@@ -51,6 +52,32 @@ export function pathId(value: unknown, label: string): number {
   return value;
 }
 
+/** `YYYY-MM-DDTHH:MM[:SS[.fff]]` with an optional `Z` or `+HH:MM` offset. */
+const ISO_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})?$/;
+
+/** Validates a tool-supplied ISO 8601 date-time before it is sent or shown in a prompt. */
+export function isoTimestamp(value: unknown, label: string): string {
+  if (
+    typeof value !== "string" ||
+    !ISO_TIMESTAMP.test(value) ||
+    Number.isNaN(Date.parse(value))
+  ) {
+    throw new Error(
+      `${label} must be an ISO 8601 date-time such as 2026-11-07T02:00:00Z`
+    );
+  }
+  return value;
+}
+
+/** Validates a tool-supplied number before it is sent or shown in a prompt. */
+export function finiteNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number`);
+  }
+  return value;
+}
+
 /** Pull a short, human-readable message out of a Syncro error body. */
 function describeErrorBody(body: unknown): string {
   if (body && typeof body === "object") {
@@ -71,16 +98,6 @@ function describeNetworkError(err: unknown): string {
   if (!(err instanceof Error)) return String(err);
   const code = (err.cause as { code?: unknown } | undefined)?.code;
   return typeof code === "string" ? `${err.message} (${code})` : err.message;
-}
-
-/**
- * For a write whose result is unknown (timeout, network error, 5xx), say so:
- * the request may have reached Syncro and been applied. Reads need no note.
- */
-function withUnknownOutcome(message: string, method: RestMethod): string {
-  return method === "GET"
-    ? message
-    : `${message}. The change may or may not have been applied; check Syncro before retrying.`;
 }
 
 /**
@@ -131,8 +148,9 @@ export async function syncroRest<T>(
       err instanceof Error && err.name === "TimeoutError"
         ? `timed out after ${REST_TIMEOUT_MS / 1000}s`
         : `failed: ${describeNetworkError(err)}`;
+    const message = `Syncro API ${method} ${path} ${reason}`;
     throw new SyncroRestError(
-      withUnknownOutcome(`Syncro API ${method} ${path} ${reason}`, method),
+      method === "GET" ? message : withUnknownOutcome(message),
       0,
       undefined
     );
@@ -155,7 +173,9 @@ export async function syncroRest<T>(
     // A 4xx means Syncro rejected the request. A 5xx can come after the change
     // was already applied, so a write that got one has an unknown outcome.
     throw new SyncroRestError(
-      response.status >= 500 ? withUnknownOutcome(message, method) : message,
+      response.status >= 500 && method !== "GET"
+        ? withUnknownOutcome(message)
+        : message,
       response.status,
       parsed
     );
