@@ -422,10 +422,11 @@ async function handleCall(
         `unit cost ${priceCost ?? "not set"}`,
         `catalog product ${productId ?? "none"}`,
         `taxable ${taxable ?? "not set"}`,
-        `description ${quote(args.description)}`,
+        `description ${args.description === undefined ? "not set" : quote(args.description)}`,
       ].join(", ");
+      const name = args.name === undefined ? "an item with no name" : quote(args.name);
       const blocked = await guardWrite(
-        `Add ${quantity} x ${quote(args.name)} (${details}) to Syncro ticket ${ticketId}?`
+        `Add ${quantity} x ${name} (${details}) to Syncro ticket ${ticketId}?`
       );
       if (blocked) return blocked;
 

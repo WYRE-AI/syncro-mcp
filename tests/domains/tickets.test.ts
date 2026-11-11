@@ -379,6 +379,24 @@ describe("domains/tickets.ts", () => {
         );
       });
 
+      it("says a description and a name are not set instead of quoting undefined", async () => {
+        vi.mocked(restModule.syncroRest).mockResolvedValue({});
+
+        await ticketsHandler.handleCall("syncro_tickets_add_line_item", {
+          ticket_id: 17,
+        });
+
+        const [prompt] = vi.mocked(guardModule.guardWrite).mock.calls[0];
+        expect(prompt).toBe(
+          "Add 1 x an item with no name (unit price not set, unit cost not set, catalog product none, taxable not set, description not set) to Syncro ticket 17?"
+        );
+        expect(prompt).not.toContain("undefined");
+        const [, request] = vi.mocked(restModule.syncroRest).mock.calls[0];
+        const sent = JSON.parse(JSON.stringify(request?.body));
+        expect(sent).not.toHaveProperty("name");
+        expect(sent).not.toHaveProperty("description");
+      });
+
       it("shows every field it sends in the prompt", async () => {
         vi.mocked(restModule.syncroRest).mockResolvedValue({});
 
