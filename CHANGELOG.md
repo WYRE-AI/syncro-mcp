@@ -56,6 +56,30 @@
   - The two renderable tools advertise the UI via `_meta` (`ui/resourceUri`, plus the nested `ui.resourceUri` form) pointing at a new `ui://syncro/ticket-card.html` resource served as `text/html;profile=mcp-app`. The card HTML is a self-contained vite single-file bundle embedded at build time (`src/generated/ticket-card-html.ts`, committed), so it serves identically from stdio, Node HTTP, and the fs-less Cloudflare Workers runtime. The server now declares the `resources` capability and answers `resources/list` / `resources/read` (`src/resources.ts`).
   - The card is neutral by default (system fonts, no vendor identity, no external fetches) and brandable via `window.__BRAND__` injection or `MCP_BRAND_*` env vars (`MCP_BRAND_NAME`, `MCP_BRAND_LOGO_URL`, `MCP_BRAND_PRIMARY_COLOR`, `MCP_BRAND_ACCENT_COLOR`, `MCP_BRAND_BG`, `MCP_BRAND_TEXT`): at serve time the server replaces the card's BRAND_INJECT marker with an inline, `<`-escaped `window.__BRAND__` script, so self-hosters can theme the card without rebuilding. No brand configured = HTML served unchanged.
 
+- **Syncro MSP job depth (WYREAI-464).** New tools cover time, ticket line
+  items and RMM and patch work that the official Syncro MCP leaves open. They call
+  Syncro's REST API directly through `src/utils/rest.ts` (30s timeout per
+  call; path IDs must be positive integers) because `@wyre-ai/node-syncro`
+  does not wrap these endpoints.
+  - **Time (new `time` domain):** `syncro_time_list_entries` (filter by
+    `billing_status`, for example `unbilled`), `syncro_time_log_entry` and
+    `syncro_time_set_billable`.
+  - **Tickets:** `syncro_tickets_add_line_item` adds a labor, part or fee line
+    item that carries onto the ticket's invoice.
+  - **Assets / RMM:** `syncro_assets_get_patches`,
+    `syncro_assets_list_installed_applications`,
+    `syncro_assets_list_policy_folders`, `syncro_assets_set_policy_folder`
+    and `syncro_assets_run_script`.
+  - **Write confirmation:** every new write asks the user through MCP
+    elicitation first, and a decline or cancel always stops the call. If the
+    client supports elicitation but the prompt fails, the write fails closed.
+    If the client cannot elicit, ordinary writes proceed (the Conduit gateway
+    applies its own confirm guard) and the destructive `syncro_assets_run_script`
+    additionally requires `confirm: true`.
+  - See `docs/WYREAI-464-capability-diff.md` for the capability diff and the
+    jobs deferred for lack of a Syncro API (backup status, KB-level patch
+    approval, recurring script schedules).
+
 ### Changed
 
 - **Client cache moved off module-level state (defense-in-depth, not a live vulnerability).** `src/utils/client.ts` held the cached Syncro client/credentials in module-level `let _client` / `let _credentials` singletons, with manual "did credentials change → invalidate → recreate" logic in `getClient()`. A security review traced that sequence end-to-end and confirmed it is **not** exploitable as coded — the validate/invalidate/recreate/return path runs synchronously with no `await` between checking credentials and using the resulting client, so there is no interleaving that hands one tenant another tenant's client. It was still structurally fragile (a future edit that introduced an `await` in the wrong spot could reintroduce that bug class) and inconsistent with the rest of this file's per-tenant state, which already lives in `AsyncLocalStorage` (`credentialStore` in `src/utils/credential-store.ts`, and the `server-ref.ts` fix above for the identical bug class in a different subsystem).
@@ -63,6 +87,14 @@
   - **Regression test:** `tests/utils/client.test.ts` runs two concurrent "tenants" (distinct credential sets) through `runWithClientScope`, each with an `await` gap between validating credentials and re-using the client, and asserts each tenant's client is cached correctly within its own scope, is built from its own credentials, and is never the same instance as the other tenant's.
 
 - **Published to GitHub Packages.** Enabled npm publishing for the already-scoped `@wyre-technology/syncro-mcp` package: `@semantic-release/npm` `npmPublish` is now `true` and `publishConfig.registry` points at `npm.pkg.github.com`. The release workflow already configured an authenticated `.npmrc` and `packages: write`. Updated the README, which previously stated there was no npm package. The GHCR image name and `io.github.wyre-technology/syncro-mcp` MCP Registry identifier are unchanged.
+
+- **Every tool now carries MCP classification annotations.** All sidecar tools,
+  including the existing customer, contact, ticket, asset and invoice tools,
+  declare `readOnlyHint` / `destructiveHint` / `idempotentHint` presets
+  (`src/utils/annotations.ts`) so the Conduit gateway can classify each as
+  read, write or destructive. `tests/classification.test.ts` fails if a tool is
+  unclassified or changes class. `syncro_invoices_email` is classified
+  destructive, and its description now warns that sending cannot be undone.
 
 ### Fixed
 
