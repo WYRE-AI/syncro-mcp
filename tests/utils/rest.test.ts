@@ -99,7 +99,7 @@ describe("utils/rest.ts", () => {
 
   it("rejects a non-JSON success body", async () => {
     fetchMock.mockResolvedValue(new Response("<html>login</html>", { status: 200 }));
-    await expect(syncroRest("/x")).rejects.toThrow(/Expected JSON/);
+    await expect(syncroRest("/x")).rejects.toThrow(/Expected a JSON object/);
   });
 
   it("passes an abort signal so a stalled call times out", async () => {
@@ -169,17 +169,56 @@ describe("utils/rest.ts", () => {
 
         expect(err).toBeInstanceOf(SyncroRestError);
         expect(err.status).toBe(200);
-        expect(err.message).toContain("Expected JSON from");
+        expect(err.message).toContain("Expected a JSON object from");
         expect(err.message).toMatch(UNKNOWN);
       }
     );
+
+    it.each(["POST", "PUT", "PATCH"] as const)(
+      "says so when a %s gets a 2xx whose body is JSON null, since it may have been applied",
+      async (method) => {
+        fetchMock.mockResolvedValue(mockResponse(200, "null"));
+
+        const err = await syncroRest("/x", { method }).catch((e) => e);
+
+        expect(err).toBeInstanceOf(SyncroRestError);
+        expect(err.status).toBe(200);
+        expect(err.message).toContain("Expected a JSON object from");
+        expect(err.message).toContain("but got: null");
+        expect(err.message).toMatch(UNKNOWN);
+        expect(fetchMock).toHaveBeenCalledOnce();
+      }
+    );
+
+    it.each(["[]", '[{"id":1}]', "7", '"ok"', "true"])(
+      "says so when a write gets a 2xx whose JSON body is %s, not an object",
+      async (body) => {
+        fetchMock.mockResolvedValue(mockResponse(201, body));
+
+        const err = await syncroRest("/x", { method: "POST" }).catch((e) => e);
+
+        expect(err).toBeInstanceOf(SyncroRestError);
+        expect(err.message).toContain("Expected a JSON object from");
+        expect(err.message).toMatch(UNKNOWN);
+      }
+    );
+
+    it("adds no note to a read that gets a 2xx whose body is JSON null", async () => {
+      fetchMock.mockResolvedValue(mockResponse(200, "null"));
+
+      const err = await syncroRest("/x").catch((e) => e);
+
+      expect(err).toBeInstanceOf(SyncroRestError);
+      expect(err.message).toContain("Expected a JSON object from");
+      expect(err.message).not.toMatch(UNKNOWN);
+    });
 
     it("adds no note to a read that gets a 2xx whose body is not JSON", async () => {
       fetchMock.mockResolvedValue(new Response("<html>login</html>", { status: 200 }));
 
       const err = await syncroRest("/x").catch((e) => e);
 
-      expect(err.message).toContain("Expected JSON from");
+      expect(err.message).toContain("Expected a JSON object from");
       expect(err.message).not.toMatch(UNKNOWN);
     });
 

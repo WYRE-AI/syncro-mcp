@@ -150,13 +150,14 @@ function describeNetworkError(err: unknown): string {
  * @param path Endpoint path starting with `/`, relative to `/api/v1`
  *   (for example `/ticket_timers`). Build IDs into it with {@link pathId}.
  * @param options HTTP method (default `GET`), query params and JSON body.
- * @returns The parsed JSON response, or `{}` when the body is empty.
- * @throws {SyncroRestError} On a non-2xx status, a non-JSON success body, or a
- *   timeout or network error (status `0`). For a write (any method but `GET`),
- *   only a 4xx response is a plain rejection; a timeout, network error, any
- *   other status, or a 2xx body that is not JSON may follow a change that was
- *   applied, and the message says so. A `GET` never carries the note. The call
- *   is made once and never retried.
+ * @returns The parsed JSON object, or `{}` when the body is empty.
+ * @throws {SyncroRestError} On a non-2xx status, a success body that is not a
+ *   JSON object (HTML, `null`, an array or a bare value), or a timeout or
+ *   network error (status `0`). For a write (any method but `GET`), only a 4xx
+ *   response is a plain rejection; a timeout, network error, any other
+ *   status, or a 2xx body that is not a JSON object may follow a change that
+ *   was applied, and the message says so. A `GET` never carries the note. The
+ *   call is made once and never retried.
  */
 export async function syncroRest<T>(
   path: string,
@@ -209,14 +210,7 @@ export async function syncroRest<T>(
   try {
     parsed = raw.trim() === "" ? {} : JSON.parse(raw);
   } catch {
-    if (response.ok) {
-      const message = `Expected JSON from ${method} ${path} but got: ${raw.slice(0, 200)}`;
-      throw new SyncroRestError(
-        outcomeKnown ? message : withUnknownOutcome(message),
-        response.status,
-        raw
-      );
-    }
+    // Not JSON: an error body is described below, a success body is refused.
   }
 
   if (!response.ok) {
@@ -225,6 +219,18 @@ export async function syncroRest<T>(
       outcomeKnown ? message : withUnknownOutcome(message),
       response.status,
       parsed
+    );
+  }
+
+  // Every endpoint used here answers with a JSON object. Anything else
+  // (HTML, `null`, a bare value) would only fail later in the caller, after a
+  // write was applied, so it is reported here instead.
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    const message = `Expected a JSON object from ${method} ${path} but got: ${raw.slice(0, 200)}`;
+    throw new SyncroRestError(
+      outcomeKnown ? message : withUnknownOutcome(message),
+      response.status,
+      raw
     );
   }
 
