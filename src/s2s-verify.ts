@@ -63,6 +63,11 @@ const KNOWN_PLACEHOLDER_SECRETS = new Set([
 /** Unresolved MCPB/DXT injection, e.g. `${user_config.conduit_s2s_secret}`. */
 const CONFIG_PLACEHOLDER = /^\$\{.*\}$/;
 
+/**
+ * True when `secret` is a known placeholder value or an unresolved
+ * `${...}` config injection. Callers must trim the input first: an untrimmed
+ * value such as `" changeme "` returns false.
+ */
 export function isKnownPlaceholderSecret(secret: string): boolean {
   return KNOWN_PLACEHOLDER_SECRETS.has(secret.toLowerCase()) || CONFIG_PLACEHOLDER.test(secret);
 }

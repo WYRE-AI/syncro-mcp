@@ -181,11 +181,12 @@ export function resolveGatewayCredentials(
  * The Syncro HTTP status an error carries, so a caller can tell a 401 from a
  * 404 from a 422. The SDK sets `statusCode`; `sdkWrite` wraps a write whose
  * outcome is unknown in a new Error and keeps the original as `cause`.
+ * `statusCode` 0 is the SDK's "no HTTP status" default, so it is skipped.
  */
 function httpStatusOf(error: unknown): number | undefined {
   for (const e of [error, (error as { cause?: unknown } | null)?.cause]) {
     const status = (e as { statusCode?: unknown } | null)?.statusCode;
-    if (typeof status === "number") return status;
+    if (typeof status === "number" && status > 0) return status;
   }
   return undefined;
 }

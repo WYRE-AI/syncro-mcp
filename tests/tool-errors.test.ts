@@ -52,7 +52,15 @@ describe("tool error text", () => {
     );
   });
 
+  it("skips the SDK's statusCode 0 sentinel and falls through to the cause", async () => {
+    const wrapped = Object.assign(new Error("Boom", { cause: statusError("Boom", 502) }), {
+      statusCode: 0,
+    });
+    expect(await callTicketsList(wrapped)).toBe("Error (HTTP 502): Boom");
+  });
+
   it.each([
+    ["an error with statusCode 0", statusError("plain", 0)],
     ["an error with no status", new Error("plain")],
     ["a non-numeric status", statusError("plain", "422")],
     ["a thrown string", "plain"],
