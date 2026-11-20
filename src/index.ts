@@ -34,33 +34,9 @@ import { createMcpServer } from "./mcp-server.js";
 import { credentialStore } from "./utils/credential-store.js";
 import { runWithServerRef, bindServerRef } from "./utils/server-ref.js";
 import { runWithClientScope, bindClientScope } from "./utils/client.js";
-import { verifyS2sHeader, S2S_HEADER } from "./s2s-verify.js";
+import { verifyS2sHeader, isKnownPlaceholderSecret, S2S_HEADER } from "./s2s-verify.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
-
-/**
- * Public example values. A copied placeholder must not verify X-Gateway-S2S
- * and must not count as "the secret is set".
- */
-const KNOWN_PLACEHOLDER_SECRETS = new Set([
-  "replace-with-a-real-secret",
-  "your-s2s-secret",
-  "your-secret",
-  "changeme",
-  "change-me",
-  "placeholder",
-  "secret",
-  "example",
-  "replace-me",
-  "s2s-secret",
-]);
-
-/** Unresolved MCPB/DXT injection, e.g. `${user_config.conduit_s2s_secret}`. */
-const CONFIG_PLACEHOLDER = /^\$\{.*\}$/;
-
-function isKnownPlaceholderSecret(secret: string): boolean {
-  return KNOWN_PLACEHOLDER_SECRETS.has(secret.toLowerCase()) || CONFIG_PLACEHOLDER.test(secret);
-}
 
 /** Hosts the insecure-dev bypass may be asked to bind. The listener is still 127.0.0.1. */
 function isLoopbackBindHost(host: string): boolean {

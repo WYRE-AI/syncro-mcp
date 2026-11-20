@@ -2,6 +2,21 @@
 
 ### Security
 
+- **The Cloudflare Worker entry now authenticates callers on `/mcp`
+  (WYREAI-748).** `src/worker.ts` checked nothing about who was calling: in env
+  mode a Worker with `SYNCRO_API_KEY` set ran every request with that key, and
+  `Access-Control-Allow-Origin: *` let a page in any browser call it, including
+  the write tools and `syncro_assets_run_script`. `/mcp` now requires a valid
+  `X-Gateway-S2S` header in both auth modes, the same check as the Node HTTP
+  entry, keyed with the `CONDUIT_S2S_SECRET` Worker secret, and fails closed
+  with a 401 when the secret is missing, empty or a known placeholder. The
+  wildcard CORS headers and the preflight handler are removed. `/health` stays
+  unauthenticated. `isKnownPlaceholderSecret` moved from `src/index.ts` to
+  `src/s2s-verify.ts` so both entries share it. Deploying the Worker now needs
+  `CONDUIT_S2S_SECRET`. `tests/worker.test.ts` covers a missing, malformed,
+  wrongly signed and stale header and an unset, empty or placeholder secret, in
+  both modes.
+
 - **Every id that reaches a request path is validated, including in the
   SDK-backed tools.** Only the REST-helper tools checked path ids. The SDK
   builds paths such as `/tickets/<id>/comment` with no encoding and `fetch`
@@ -158,8 +173,8 @@
     that is sent (time entry notes, a line item name and description, and
     the destructive tools' values) is shown as the raw JSON string or the
     call is refused; see the Security entries above. A line item name or
-    description that was not given is shown as "not set" instead of
-    `"undefined"`. A line item prompt shows
+    description that was not given is shown as "an item with no name" or
+    "not set" instead of `"undefined"`. A line item prompt shows
     every field it sends: quantity, name, description, unit price, unit cost,
     catalog product and taxable. All through `src/utils/prompt-text.ts`.
   - **Write failures:** only a 4xx response (including a 429) means Syncro
@@ -176,9 +191,10 @@
     Every write is sent once; see "Writes are sent once" under Fixed. The REST
     helper sets a 30s timeout; the SDK sets none and this server does not add
     one. An error body that ends in a full stop no longer produces `..` before
-    that sentence. An SDK-backed write that gets a 2xx with an array or a bare
-    value is returned as a success without the note: `sdkWrite` does not check
-    the shape of an SDK response.
+    that sentence. An SDK-backed write that gets a 2xx whose JSON body is an
+    array or a bare value is returned as a success without the note: `sdkWrite`
+    does not check the shape of an SDK response. A 2xx that is not JSON makes
+    the SDK throw, and that error carries the note.
   - **Stricter argument validation:** these checks run before a prompt is
     built or a request is sent, and a failure is returned as an error with no
     outbound call. `asset_id`, `script_id`, `policy_folder_id`, `ticket_id`,
@@ -204,6 +220,16 @@
     approval, recurring script schedules).
 
 ### Changed
+
+- **Docs match the code (WYREAI-751).** A line item with no name is shown as
+  "an item with no name" (a missing description is "not set"); the script
+  variables limit of 1000 is counted in UTF-16 code units on the JSON-escaped
+  listing, not in characters; and a 2xx that is not JSON makes the SDK throw, so
+  only a 2xx whose JSON body is an array or a bare value is returned as a
+  success without the unknown-outcome note. The README has a new "Known
+  limitations" section that accepts the remaining PR #92 gaps, and tests now
+  pin that an explicit `null` for time entry `notes` or a line item `name` or
+  `description` is refused.
 
 - **Client cache moved off module-level state (defense-in-depth, not a live vulnerability).** `src/utils/client.ts` held the cached Syncro client/credentials in module-level `let _client` / `let _credentials` singletons, with manual "did credentials change → invalidate → recreate" logic in `getClient()`. A security review traced that sequence end-to-end and confirmed it is **not** exploitable as coded — the validate/invalidate/recreate/return path runs synchronously with no `await` between checking credentials and using the resulting client, so there is no interleaving that hands one tenant another tenant's client. It was still structurally fragile (a future edit that introduced an `await` in the wrong spot could reintroduce that bug class) and inconsistent with the rest of this file's per-tenant state, which already lives in `AsyncLocalStorage` (`credentialStore` in `src/utils/credential-store.ts`, and the `server-ref.ts` fix above for the identical bug class in a different subsystem).
   - **Fix:** the client cache now lives in an `AsyncLocalStorage`-scoped box instead of module variables (`runWithClientScope` for per-request transports — Node HTTP, Workers — and `bindClientScope` for the single-session stdio transport), mirroring `server-ref.ts`. Credential resolution, error messages, and the mismatch-detect-and-recreate behavior are unchanged — only where the mutable state lives has changed. Call sites updated: `src/index.ts` (Node HTTP `handleMcp` wraps the connect/handleRequest chain in `runWithClientScope`; stdio calls `bindClientScope` once at startup), `src/worker.ts` (Cloudflare Workers `handleMcp` wraps the connect/handleRequest chain in `runWithClientScope`). `getClient()` / `getCredentials()` / `clearClient()` keep their existing signatures and behavior, so no domain handler call sites changed.
@@ -248,6 +274,12 @@
   enforce.
 
 ### Fixed
+
+- **A failed tool call keeps the Syncro HTTP status (WYREAI-751).** The error
+  text is now `Error (HTTP 422): ...` when the thrown error carries a numeric
+  `statusCode` (the SDK's errors do, including one that `sdkWrite` wrapped with
+  the unknown-outcome note), so a caller can tell a 401 from a 404 from a 422.
+  An error with no status keeps the plain `Error: ...` form.
 
 - **Writes are sent once.** The SDK resends a POST after a 5xx or 429, so one
   call to `syncro_tickets_create`, `_add_comment`, `syncro_invoices_email` or

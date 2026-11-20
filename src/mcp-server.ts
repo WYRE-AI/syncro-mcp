@@ -178,6 +178,20 @@ export function resolveGatewayCredentials(
 }
 
 /**
+ * The Syncro HTTP status an error carries, so a caller can tell a 401 from a
+ * 404 from a 422. The SDK sets `statusCode`; `sdkWrite` wraps a write whose
+ * outcome is unknown in a new Error and keeps the original as `cause`.
+ * `statusCode` 0 is the SDK's "no HTTP status" default, so it is skipped.
+ */
+function httpStatusOf(error: unknown): number | undefined {
+  for (const e of [error, (error as { cause?: unknown } | null)?.cause]) {
+    const status = (e as { statusCode?: unknown } | null)?.statusCode;
+    if (typeof status === "number" && status > 0) return status;
+  }
+  return undefined;
+}
+
+/**
  * Create a fresh MCP server instance with all handlers registered.
  * Called once for stdio, or per-request for HTTP / Workers transports.
  *
@@ -313,8 +327,10 @@ export function createMcpServer(): Server {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const status = httpStatusOf(error);
+      const prefix = status === undefined ? "Error" : `Error (HTTP ${status})`;
       return {
-        content: [{ type: "text", text: `Error: ${message}` }],
+        content: [{ type: "text", text: `${prefix}: ${message}` }],
         isError: true,
       };
     }

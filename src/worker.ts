@@ -7,6 +7,13 @@
  * entrypoints (see `mcp-server.ts`), so there is no second tool implementation
  * to maintain.
  *
+ * Caller authentication: every `/mcp` request must carry a valid
+ * `X-Gateway-S2S` header, the same check the Node HTTP entry makes, keyed with
+ * the `CONDUIT_S2S_SECRET` Worker secret. It fails closed: with no secret (or a
+ * known placeholder) configured, every `/mcp` request gets a 401. `/health`
+ * stays unauthenticated. There are no CORS headers: this is a server-to-server
+ * endpoint, and a browser page must not be able to call it.
+ *
  * Credentials are resolved per request, in order:
  * 1. Gateway headers (when AUTH_MODE=gateway):
  *    - X-Syncro-API-Key
@@ -27,6 +34,11 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer, resolveGatewayCredentials } from "./mcp-server.js";
 import {
+  S2S_HEADER,
+  isKnownPlaceholderSecret,
+  verifyS2sHeader,
+} from "./s2s-verify.js";
+import {
   credentialStore,
   type RequestCredentials,
 } from "./utils/credential-store.js";
@@ -37,32 +49,22 @@ export interface Env {
   SYNCRO_API_KEY?: string;
   SYNCRO_SUBDOMAIN?: string;
   AUTH_MODE?: string;
+  CONDUIT_S2S_SECRET?: string;
   LOG_LEVEL?: string;
 }
-
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers":
-    "Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version, X-Syncro-API-Key, X-Syncro-Subdomain",
-  "Access-Control-Expose-Headers": "Mcp-Session-Id",
-};
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    headers: { "Content-Type": "application/json" },
   });
 }
 
-function withCors(res: Response): Response {
-  const headers = new Headers(res.headers);
-  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
-  return new Response(res.body, {
-    status: res.status,
-    statusText: res.statusText,
-    headers,
-  });
+/** True when the request carries a valid X-Gateway-S2S header; false when no real secret is configured. */
+function hasValidS2s(request: Request, env: Env): boolean {
+  const secret = (env.CONDUIT_S2S_SECRET ?? "").trim();
+  if (!secret || isKnownPlaceholderSecret(secret)) return false;
+  return verifyS2sHeader(request.headers.get(S2S_HEADER) ?? undefined, secret);
 }
 
 /**
@@ -88,7 +90,7 @@ async function handleMcp(request: Request): Promise<Response> {
 
       try {
         const response = await transport.handleRequest(request);
-        return withCors(response);
+        return response;
       } finally {
         await transport.close();
         await server.close();
@@ -101,11 +103,6 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // CORS preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
-    }
-
     // Shallow, unauthenticated liveness probe.
     if (url.pathname === "/health" || url.pathname === "/healthz") {
       return json({
@@ -117,6 +114,17 @@ export default {
     }
 
     if (url.pathname === "/mcp") {
+      // Checked first, before any credential is read, in both auth modes.
+      if (!hasValidS2s(request, env)) {
+        return json(
+          {
+            error:
+              "Missing or invalid X-Gateway-S2S header: this endpoint only accepts requests signed by the gateway.",
+          },
+          401
+        );
+      }
+
       const isGatewayMode = (env.AUTH_MODE ?? "env") === "gateway";
 
       let creds: RequestCredentials | undefined;
