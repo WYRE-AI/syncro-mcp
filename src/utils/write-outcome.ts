@@ -6,9 +6,11 @@
  * The rule, for both paths: only a 4xx response means Syncro rejected the
  * request. A write that ends any other way (timeout, network error or 5xx)
  * may have been applied, and its error carries this note. The REST helper
- * also applies it to a 2xx whose body is not a JSON object; an SDK write
- * that gets such a 2xx is returned as a success, because the shape of an SDK
- * response is not checked. Each write is sent once; neither path retries.
+ * also applies it to a 2xx whose body is not a JSON object. An SDK write
+ * that gets a 2xx whose JSON body is an array or a bare value is returned as
+ * a success, because the shape of an SDK response is not checked; a 2xx that
+ * is not JSON at all makes the SDK throw, and that error carries the note.
+ * Each write is sent once; neither path retries.
  */
 
 import type { SyncroClient } from "@wyre-ai/node-syncro";

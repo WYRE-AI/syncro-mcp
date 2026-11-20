@@ -409,10 +409,12 @@ describe("domains/tickets.ts", () => {
         ["name", "Labor\u202e", /name contains the character U\+202E/],
         ["name", "a\u00a0b", /name contains the character U\+00A0/],
         ["name", 5, /name must be a string/],
+        ["name", null, /name must be a string/],
         ["name", "n".repeat(201), /name is 201 characters, over the 200/],
         ["description", "1h\u001b[2J", /description contains the character U\+001B/],
         ["description", "1h\u2800", /description contains the character U\+2800/],
         ["description", { a: 1 }, /description must be a string/],
+        ["description", null, /description must be a string/],
         ["description", "d".repeat(1001), /description is 1001 characters, over the 1000/],
       ])(
         "refuses a %s that cannot be shown as sent, with no prompt and no request",

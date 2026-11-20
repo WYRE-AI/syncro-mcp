@@ -197,7 +197,11 @@ function getTools(): Tool[] {
   ];
 }
 
-/** Longest list of script variables the run-script prompt shows. */
+/**
+ * Longest list of script variables the run-script prompt shows. Counted in
+ * UTF-16 code units (`String.length`) on the JSON-escaped listing, unlike the
+ * per-value limit, which counts code points.
+ */
 const MAX_VARIABLES_PROMPT = 1000;
 
 /**

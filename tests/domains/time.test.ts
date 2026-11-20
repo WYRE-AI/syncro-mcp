@@ -228,6 +228,7 @@ describe("domains/time.ts", () => {
       ["a right-to-left override", "done\u202e", /notes contains the character U\+202E/],
       ["a non-breaking space", "a\u00a0b", /notes contains the character U\+00A0/],
       ["a value that is not a string", 5, /notes must be a string/],
+      ["null", null, /notes must be a string/],
       ["more than 1000 characters", "x".repeat(1001), /notes is 1001 characters, over the 1000/],
     ])("refuses notes with %s, with no prompt and no request", async (_name, notes, message) => {
       await expect(
