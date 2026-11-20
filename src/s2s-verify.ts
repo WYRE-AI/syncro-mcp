@@ -42,3 +42,27 @@ export function verifyS2sHeader(
   const provided = Buffer.from(match[2], "hex");
   return provided.length === expected.length && timingSafeEqual(provided, expected);
 }
+
+/**
+ * Public example values. A copied placeholder must not verify X-Gateway-S2S
+ * and must not count as "the secret is set".
+ */
+const KNOWN_PLACEHOLDER_SECRETS = new Set([
+  "replace-with-a-real-secret",
+  "your-s2s-secret",
+  "your-secret",
+  "changeme",
+  "change-me",
+  "placeholder",
+  "secret",
+  "example",
+  "replace-me",
+  "s2s-secret",
+]);
+
+/** Unresolved MCPB/DXT injection, e.g. `${user_config.conduit_s2s_secret}`. */
+const CONFIG_PLACEHOLDER = /^\$\{.*\}$/;
+
+export function isKnownPlaceholderSecret(secret: string): boolean {
+  return KNOWN_PLACEHOLDER_SECRETS.has(secret.toLowerCase()) || CONFIG_PLACEHOLDER.test(secret);
+}
